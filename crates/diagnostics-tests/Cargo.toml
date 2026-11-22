@@ -1,0 +1,37 @@
+[package]
+name = "chrono-diagnostics-tests"
+version = "0.1.0"
+edition = "2024"
+publish = false
+autotests = false
+
+[dependencies]
+chrono-diagnostics = { path = "../diagnostics" }
+serde_json = "1"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[[test]]
+name = "records"
+path = "tests/records.rs"
+
+[[test]]
+name = "rolling"
+path = "tests/rolling.rs"
+
+[[test]]
+name = "verified_error"
+path = "tests/verified_error.rs"
+
+[[test]]
+name = "verified_runtime"
+path = "tests/verified_runtime.rs"
+
+[[test]]
+name = "verified_rolling"
+path = "tests/verified_rolling.rs"
+
+[[bin]]
+name = "chrono-test-log-writer"
+path = "tests/support/log_writer.rs"
+test = false
+bench = false

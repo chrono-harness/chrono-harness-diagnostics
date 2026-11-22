@@ -1,0 +1,255 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::error::Error as StdError;
+use std::fmt;
+use std::io;
+
+pub type Context = BTreeMap<String, Value>;
+
+pub type ErrorNode = crate::verified_error::ErrorNode<Context>;
+pub type RelatedError = crate::verified_error::RelatedError<Context>;
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ErrorSchema {
+    #[serde(rename = "chrono-error/v1")]
+    V1,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ErrorRecord {
+    pub schema: ErrorSchema,
+    pub error: ErrorNode,
+}
+
+/// An error and the record produced by its concrete owner travel together.
+/// This trait deliberately does not guess a concrete type from erased Display text.
+pub trait RecordedError: StdError + Send + Sync + 'static {
+    fn error_node(&self) -> ErrorNode;
+}
+
+/// Adopts a native IO error without replacing its typed value with Display text.
+#[derive(Debug)]
+pub struct NativeIoError {
+    source: io::Error,
+}
+
+impl NativeIoError {
+    pub fn new(source: io::Error) -> Self {
+        Self { source }
+    }
+
+    pub fn as_io_error(&self) -> &io::Error {
+        &self.source
+    }
+
+    pub fn into_io_error(self) -> io::Error {
+        self.source
+    }
+}
+
+impl fmt::Display for NativeIoError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl StdError for NativeIoError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(&self.source)
+    }
+}
+
+pub(crate) fn io_error_node(error: &io::Error) -> ErrorNode {
+    let mut context = Context::new();
+    context.insert("kind".into(), format!("{:?}", error.kind()).into());
+    let recorded = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<Failure>());
+    if error.get_ref().is_some() && recorded.is_none() {
+        context.insert("custom_source".into(), "not_recorded".into());
+    }
+    ErrorNode::assemble(
+        "std::io::Error".into(),
+        format!("io::{:?}", error.kind()),
+        error.to_string(),
+        context,
+        recorded.map(|source| Box::new(source.error_node())),
+        error.raw_os_error().map(i64::from),
+        None,
+        Vec::new(),
+    )
+}
+
+impl RecordedError for NativeIoError {
+    fn error_node(&self) -> ErrorNode {
+        ErrorNode::assemble(
+            std::any::type_name::<Self>().into(),
+            "E_NATIVE_IO".into(),
+            self.to_string(),
+            [("kind".into(), format!("{:?}", self.source.kind()).into())]
+                .into_iter()
+                .collect(),
+            Some(Box::new(io_error_node(&self.source))),
+            self.source.raw_os_error().map(i64::from),
+            None,
+            Vec::new(),
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct Failure {
+    node: ErrorNode,
+    source: Option<Box<dyn RecordedError>>,
+    related: Vec<(String, Box<dyn RecordedError>)>,
+}
+
+impl Failure {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        let node = ErrorNode::new(
+            std::any::type_name::<Self>().into(),
+            code.into(),
+            message.into(),
+            Context::new(),
+        );
+        let (node, source, related) = crate::verified_error::initialize(node);
+        Self {
+            node,
+            source,
+            related,
+        }
+    }
+
+    pub fn at(mut self, name: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.node.context.insert(name.into(), value.into());
+        self
+    }
+
+    pub fn wrap(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        source: impl RecordedError,
+    ) -> Self {
+        let Self {
+            node,
+            source: previous,
+            related,
+        } = Self::new(code, message);
+        let source: Box<dyn RecordedError> = Box::new(source);
+        let (node, source, related) =
+            crate::verified_error::set_source((node, previous, related), source);
+        Self {
+            node,
+            source,
+            related,
+        }
+    }
+
+    pub fn with_related(self, role: impl Into<String>, error: impl RecordedError) -> Self {
+        let Self {
+            node,
+            source,
+            related,
+        } = self;
+        let role = role.into();
+        let error: Box<dyn RecordedError> = Box::new(error);
+        let (node, source, related) =
+            crate::verified_error::append_related((node, source, related), role, error);
+        Self {
+            node,
+            source,
+            related,
+        }
+    }
+
+    pub fn record(&self) -> ErrorRecord {
+        ErrorRecord {
+            schema: ErrorSchema::V1,
+            error: self.error_node(),
+        }
+    }
+
+    pub fn related(&self) -> impl Iterator<Item = (&str, &dyn RecordedError)> {
+        self.related
+            .iter()
+            .map(|(role, error)| (role.as_str(), error.as_ref()))
+    }
+}
+
+impl RecordedError for Failure {
+    fn error_node(&self) -> ErrorNode {
+        let node = self.node.clone();
+        let source = self
+            .source
+            .as_ref()
+            .map(|source| Box::new(source.error_node()));
+        let related = self
+            .related
+            .iter()
+            .map(|(role, error)| RelatedError::new(role.clone(), error.error_node()))
+            .collect();
+        node.with_causes(source, related)
+    }
+}
+
+impl fmt::Display for Failure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.node.message)
+    }
+}
+
+impl StdError for Failure {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        self.source
+            .as_ref()
+            .map(|source| source.as_ref() as &dyn StdError)
+    }
+}
+
+/// A received record remains a typed cause; importing it adds no claim of local execution.
+#[derive(Debug)]
+pub struct ReceivedError {
+    node: ErrorNode,
+    source: Option<Box<ReceivedError>>,
+}
+
+impl From<ErrorRecord> for ReceivedError {
+    fn from(record: ErrorRecord) -> Self {
+        Self::from_node(record.error)
+    }
+}
+
+impl ReceivedError {
+    fn from_node(node: ErrorNode) -> Self {
+        let (node, source) = node.detach_source();
+        let source = source.map(|source| Box::new(Self::from_node(*source)));
+        Self { node, source }
+    }
+}
+
+impl fmt::Display for ReceivedError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.node.message)
+    }
+}
+
+impl StdError for ReceivedError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        self.source
+            .as_ref()
+            .map(|source| source.as_ref() as &dyn StdError)
+    }
+}
+
+impl RecordedError for ReceivedError {
+    fn error_node(&self) -> ErrorNode {
+        let node = self.node.clone();
+        let source = self
+            .source
+            .as_ref()
+            .map(|source| Box::new(source.error_node()));
+        node.with_source(source)
+    }
+}
