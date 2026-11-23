@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-scratch=$(mktemp -d)
+mkdir -p target
+scratch=$(mktemp -d "$(pwd -P)/target/check.XXXXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
-export CARGO_TARGET_DIR="$scratch/cargo"
+export TMPDIR="$scratch"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$scratch/cargo}"
 cargo fmt --check --manifest-path crates/diagnostics/Cargo.toml
 cargo fmt --check --manifest-path crates/diagnostics-tests/Cargo.toml
 cargo build --locked --manifest-path crates/diagnostics/Cargo.toml
