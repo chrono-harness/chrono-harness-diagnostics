@@ -61,18 +61,48 @@ impl StdError for NativeIoError {
     }
 }
 
+/// OS errors can be reconstructed by code. A caller-created IO error carries
+/// its original kind and presence of an opaque source across the writer boundary.
+#[derive(Debug)]
+pub(crate) struct WriterError {
+    pub kind: String,
+    pub message: String,
+    pub custom_source: bool,
+}
+
+impl fmt::Display for WriterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+impl StdError for WriterError {}
+
+fn io_kind(error: &io::Error) -> String {
+    error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<WriterError>())
+        .map(|source| source.kind.clone())
+        .unwrap_or_else(|| format!("{:?}", error.kind()))
+}
+
 pub(crate) fn io_error_node(error: &io::Error) -> ErrorNode {
     let mut context = Context::new();
-    context.insert("kind".into(), format!("{:?}", error.kind()).into());
+    let kind = io_kind(error);
+    context.insert("kind".into(), kind.clone().into());
     let recorded = error
         .get_ref()
         .and_then(|source| source.downcast_ref::<Failure>());
-    if error.get_ref().is_some() && recorded.is_none() {
+    if error.get_ref().is_some_and(|source| {
+        source
+            .downcast_ref::<WriterError>()
+            .is_none_or(|writer| writer.custom_source)
+    }) && recorded.is_none()
+    {
         context.insert("custom_source".into(), "not_recorded".into());
     }
     ErrorNode::assemble(
         "std::io::Error".into(),
-        format!("io::{:?}", error.kind()),
+        format!("io::{kind}"),
         error.to_string(),
         context,
         recorded.map(|source| Box::new(source.error_node())),
@@ -88,7 +118,7 @@ impl RecordedError for NativeIoError {
             std::any::type_name::<Self>().into(),
             "E_NATIVE_IO".into(),
             self.to_string(),
-            [("kind".into(), format!("{:?}", self.source.kind()).into())]
+            [("kind".into(), io_kind(&self.source).into())]
                 .into_iter()
                 .collect(),
             Some(Box::new(io_error_node(&self.source))),

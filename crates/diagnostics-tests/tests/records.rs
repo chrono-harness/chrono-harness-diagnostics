@@ -599,3 +599,93 @@ fn partial_sink_failure_blocks_further_writes_without_retrying_or_replacing_the_
     assert!(Arc::ptr_eq(&logger.finish().unwrap_err()[0], &failures[0]));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
+
+fn trace_session(requests: &[Value]) -> (u8, Vec<Value>) {
+    let input: Vec<u8> = requests
+        .iter()
+        .flat_map(|request| {
+            let mut bytes = serde_json::to_vec(request).unwrap();
+            bytes.push(b'\n');
+            bytes
+        })
+        .collect();
+    let captured = Captured::default();
+    let status = chrono_diagnostics::trace_events::serve(
+        std::path::Path::new("no-policy-fixture"),
+        "explicit-writer",
+        io::Cursor::new(input),
+        captured.clone(),
+    )
+    .unwrap();
+    let output = captured.0.lock().unwrap();
+    let replies = serde_json::Deserializer::from_slice(&output)
+        .into_iter()
+        .collect::<Result<Vec<Value>, _>>()
+        .unwrap();
+    (status, replies)
+}
+
+#[test]
+fn installed_traces_keep_context_filter_and_report_the_explicit_writer_failure() {
+    let callsite = |id, kind, level, name, fields: &[&str]| {
+        json!({"event":{"new_call_site":{
+        "id":id,"kind":kind,"name":name,"level":level,"target":"ci","fields":fields}}})
+    };
+    let event = |id| json!({"event":{"new_event":{"metadata_id":id,"values":{"event_id":{"string":"check.started"}}}}});
+    let mut requests = vec![
+        callsite(1, "span", "info", "check", &["candidate"]),
+        callsite(2, "event", "info", "start", &["event_id"]),
+        callsite(3, "event", "debug", "detail", &["event_id"]),
+        json!({"event":{"new_span":{"id":9,"metadata_id":1,"values":{"candidate":{"string":"fixed"}}}}}),
+        json!({"event":{"span_entered":{"id":9}}}),
+        event(3),
+        event(2),
+    ];
+    let mut success = requests.clone();
+    success.extend([json!("ok"), json!("ok"), json!("finish"), json!("ok")]);
+    let (status, replies) = trace_session(&success);
+    assert_eq!(status, 0, "{replies:?}");
+    let writes: Vec<_> = replies
+        .iter()
+        .filter_map(|reply| reply["write"].as_str())
+        .collect();
+    assert_eq!(writes.len(), 1);
+    let record: LogRecord = serde_json::from_str(writes[0]).unwrap();
+    assert_eq!(record.context["candidate"], "fixed");
+    assert_eq!(record.event, "check.started");
+    assert_eq!(record.producer, "explicit-writer");
+    assert_eq!(replies.last().unwrap(), &json!({"finished":[]}));
+    requests.extend([
+        json!({"error":{"native_code":28,"message":"sink full","kind":"StorageFull","custom_source":false}}),
+        json!("finish"),
+    ]);
+    let (status, replies) = trace_session(&requests);
+    assert_eq!(status, 2, "{replies:?}");
+    let error = &replies.last().unwrap()["finished"][0]["error"];
+    assert_eq!(error["code"], "E_LOG_IO");
+    assert_eq!(error["source"]["native_code"], 28);
+    let failure_index = requests.len() - 2;
+    requests[failure_index] = json!({"error":{"native_code":null,"kind":"InvalidData","custom_source":true,"message":"invalid output"}});
+    let (custom_status, custom_replies) = trace_session(&requests);
+    assert_eq!(custom_status, 2);
+    let source = &custom_replies.last().unwrap()["finished"][0]["error"]["source"];
+    assert_eq!(source["code"], "io::InvalidData");
+    assert_eq!(source["message"], "invalid output");
+    assert_eq!(source["context"]["custom_source"], "not_recorded");
+    assert!(
+        error["context"]["attempted_record"]
+            .as_array()
+            .unwrap()
+            .ends_with(&[json!(10)])
+    );
+}
+
+#[test]
+fn truncated_trace_session_reports_the_missing_terminal_message() {
+    let (status, replies) = trace_session(&[]);
+    assert_eq!(status, 2, "{replies:?}");
+    assert_eq!(
+        replies.last().unwrap()["finished"][0]["error"]["code"],
+        "E_LOG_PROTOCOL"
+    );
+}

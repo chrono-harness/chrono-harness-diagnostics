@@ -17,6 +17,7 @@ dependencies = [
  "time",
  "tracing",
  "tracing-subscriber",
+ "tracing-tunnel",
  "verus_builtin_macros",
 ]
 
@@ -241,6 +242,17 @@ checksum = "2054a14f5307d601f88daf0553e1cbf472acc4f2c51afab632431cdcd72124d5"
 dependencies = [
  "sharded-slab",
  "thread_local",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-tunnel"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "507bbab1fc2c9e606543558f5656b62e8014ba7e0ffa68b9484511b6871019c5"
+dependencies = [
+ "once_cell",
+ "serde",
  "tracing-core",
 ]
 

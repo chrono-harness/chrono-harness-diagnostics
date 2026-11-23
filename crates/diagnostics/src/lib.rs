@@ -4,6 +4,8 @@ pub mod error;
 pub mod logging;
 pub mod rolling;
 pub mod runtime;
+#[cfg(not(verus_keep_ghost))]
+pub mod trace_events;
 pub mod verified_error;
 pub mod verified_rolling;
 pub mod verified_runtime;
