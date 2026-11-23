@@ -318,41 +318,92 @@ pub fn cli(producer: &str, work: impl FnOnce() -> u8) -> u8 {
 /// Use a host and operation already selected by an entry with positional arguments.
 #[cfg(not(verus_keep_ghost))]
 pub fn cli_at(root: &Path, producer: &str, operation: &str, work: impl FnOnce() -> u8) -> u8 {
+    cli_session(root, producer, operation, std::process::id(), || Ok(work()))
+}
+
+/// Record the lifecycle reported by an independently installed command.
+#[cfg(not(verus_keep_ghost))]
+pub fn cli_events(
+    root: &Path,
+    producer: &str,
+    operation: &str,
+    pid: u32,
+    input: impl Read,
+    mut ready: impl Write,
+) -> u8 {
+    #[derive(Deserialize)]
+    #[serde(untagged, deny_unknown_fields)]
+    enum Event {
+        Diagnostic { diagnostic: String },
+        Finished { exit_code: u8 },
+    }
+    cli_session(root, producer, operation, pid, || {
+        ready
+            .write_all(b"{\"ready\":true}\n")
+            .and_then(|()| ready.flush())
+            .map_err(io_failure)?;
+        for event in serde_json::Deserializer::from_reader(input).into_iter::<Event>() {
+            match event.map_err(|error| Failure::new("E_LOG_PROTOCOL", error.to_string()))? {
+                Event::Diagnostic {
+                    diagnostic: message,
+                } => diagnostic(&message),
+                Event::Finished { exit_code } => return Ok(exit_code),
+            }
+        }
+        Err(Failure::new(
+            "E_LOG_PROTOCOL",
+            "command ended without reporting its exit code",
+        ))
+    })
+}
+
+#[cfg(not(verus_keep_ghost))]
+fn cli_session(
+    root: &Path,
+    producer: &str,
+    operation: &str,
+    pid: u32,
+    work: impl FnOnce() -> Result<u8, Failure>,
+) -> u8 {
+    let failed = |error: Failure| {
+        emergency(producer, &error);
+        2
+    };
     let logger = match configured_logger(root, producer, io::stderr()) {
         Ok(Some(logger)) => logger,
-        Ok(None) => return work(),
-        Err(error) => {
-            emergency(producer, &error);
-            return 2;
-        }
-    };
-    let root = match fs::canonicalize(root) {
-        Ok(root) => root,
-        Err(error) => {
-            emergency(producer, &io_failure(error));
-            return 2;
-        }
+        Ok(None) => return work().unwrap_or_else(failed),
+        Err(error) => return failed(error),
     };
     let exit = logger.run(|| {
-        let span = tracing::info_span!("cli", pid = std::process::id(), operation, host_root = %root.display());
+        let span = tracing::info_span!("cli", pid, operation, host_root = %root.display());
         let _entered = span.enter();
         tracing::info!(event_id = "cli.started", "command started");
-        let exit = work();
+        let exit = work()?;
         if exit == 0 {
-            tracing::info!(event_id = "cli.finished", exit_code = exit, "command returned");
+            tracing::info!(
+                event_id = "cli.finished",
+                exit_code = exit,
+                "command returned"
+            );
         } else {
-            tracing::error!(event_id = "cli.finished", exit_code = exit, "command returned with failure");
+            tracing::error!(
+                event_id = "cli.finished",
+                exit_code = exit,
+                "command returned with failure"
+            );
         }
-        exit
+        Ok(exit)
     });
     if let Err(errors) = logger.finish() {
-        let mut failure = Failure::new("E_RUNTIME_LOG", "runtime log publication failed")
-            .at("operation_exit_code", u64::from(exit));
+        let mut failure = Failure::new("E_RUNTIME_LOG", "runtime log publication failed");
+        match exit {
+            Ok(code) => failure = failure.at("operation_exit_code", u64::from(code)),
+            Err(source) => failure = failure.with_related("protocol", source),
+        }
         for error in errors {
             failure = failure.with_related("logging", error);
         }
-        emergency(producer, &failure);
-        return 2;
+        return failed(failure);
     }
-    exit
+    exit.unwrap_or_else(failed)
 }

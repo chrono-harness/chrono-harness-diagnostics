@@ -451,3 +451,64 @@ fn concurrent_processes_reopen_after_rotation_and_keep_whole_records() {
         assert!(fs::metadata(path).unwrap().len() <= 2048);
     }
 }
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn external_cli_reports_its_own_pid_diagnostic_and_exit() {
+    let fixture = Fixture::new();
+    fixture.policy(65536, 3, "info");
+    let mut ready = Vec::new();
+    let exit = runtime::cli_events(
+        &fixture.0,
+        "chrono-inputs",
+        "pair",
+        4242,
+        &b"{\"diagnostic\":\"missing source\"}\n{\"exit_code\":7}\n"[..],
+        &mut ready,
+    );
+    assert_eq!(ready, b"{\"ready\":true}\n");
+    assert_eq!(exit, 7);
+    let rows = records(&fixture.0.join(".chrono-harness/state/logs"));
+    assert_eq!(
+        rows.iter()
+            .map(|v| v["event"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["cli.started", "cli.diagnostic", "cli.finished"]
+    );
+    assert!(
+        rows.iter()
+            .all(|r| r["producer"] == "chrono-inputs" && r["context"]["pid"] == 4242)
+    );
+    assert_eq!(rows[1]["message"], "missing source");
+    assert_eq!(rows[2]["fields"]["exit_code"], 7);
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn missing_or_malformed_completion_never_publishes_a_finished_event() {
+    for input in [
+        "",
+        "{\"diagnostic\":\"cut off\"",
+        "{\"exit_code\":300}",
+        "{\"exit_code\":0,\"unknown\":true}",
+    ] {
+        let fixture = Fixture::new();
+        fixture.policy(65536, 3, "info");
+        let mut ready = Vec::new();
+        assert_eq!(
+            runtime::cli_events(
+                &fixture.0,
+                "example",
+                "work",
+                2,
+                input.as_bytes(),
+                &mut ready
+            ),
+            2
+        );
+        assert_eq!(ready, b"{\"ready\":true}\n");
+        let rows = records(&fixture.0.join(".chrono-harness/state/logs"));
+        assert_eq!(rows[0]["event"], "cli.started");
+        assert!(rows.iter().all(|r| r["event"] != "cli.finished"));
+    }
+}

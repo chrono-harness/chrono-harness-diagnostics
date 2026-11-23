@@ -9,3 +9,7 @@ Rust 结构化错误、运行日志和按创建期限滚动的文件日志。
 ## 定时回收日志
 
 从本仓 Release 下载当前平台的 `chrono-diagnostics`，按同一 Release 的 `SHA256SUMS` 校验后安装到工作树外。宿主可运行 `chrono-diagnostics expire-logs-v1 ROOT` 回收该检出的到期日志，程序读取现有 `.chrono-harness/logging.json`。没有时间保留策略时，stdout 为 JSON `null`；否则返回 `removed`、`legacy`、`busy` 和 `errors`。成功或写入者正持锁时退出 0，单项删除失败时退出 1 并保留完整 JSON。配置、读取或结果发布失败时退出 2，诊断写入 stderr。
+
+## 记录独立命令的运行日志
+
+启用日志的命令可以调用 `chrono-diagnostics cli-events-v1 ROOT PRODUCER OPERATION PID`。传入实际业务进程的 PID。读取标准输出的一行 `{"ready":true}` 后开始工作。业务可向其标准输入写入 `{"diagnostic":"原始错误"}`，最后写入 `{"exit_code":N}` 并等待子进程结束。每条消息都是单个 JSON 对象。业务的标准输出由业务命令直接交给使用方。日志使用宿主的级别、目录、滚动和过期策略。成功发布日志时返回业务退出码，输入损坏、缺少终态或日志发布失败时返回 2。
