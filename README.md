@@ -12,7 +12,7 @@ Rust 结构化错误、运行日志和按创建期限滚动的文件日志。
 
 ## 记录独立命令的运行日志
 
-启用日志的命令可以调用 `chrono-diagnostics cli-events-v1 ROOT PRODUCER OPERATION PID`。传入实际业务进程的 PID。读取标准输出的一行 `{"ready":true}` 后开始工作。业务可向其标准输入写入 `{"diagnostic":"原始错误"}`，最后写入 `{"exit_code":N}` 并等待子进程结束。每条消息都是单个 JSON 对象。业务的标准输出由业务命令直接交给使用方。日志使用宿主的级别、目录、滚动和过期策略。成功发布日志时返回业务退出码，输入损坏、缺少终态或日志发布失败时返回 2。
+启用日志的命令可以调用 `chrono-diagnostics cli-events-v1 ROOT PRODUCER OPERATION PID`。传入实际业务进程的 PID。读取标准输出的一行 `{"ready":true}` 后开始工作。业务可向其标准输入写入 `{"diagnostic":"原始错误"}`，最后写入 `{"exit_code":N}` 并等待子进程结束。每条消息都是单个 JSON 对象。业务的标准输出由业务命令直接交给使用方。日志使用宿主的级别、目录、滚动和过期策略。成功发布日志时返回业务退出码，输入损坏、缺少终态或日志发布失败时返回 2。 同一个会话也接受 `{"event":EVENT}`，用于记录业务进程实际发出的 tracing-tunnel 0.1 事件与 span。原生参数解码失败时可发送 `{"invalid_argument":{"argv_index":N,"bytes":[...]}}`，将原字节及位置发到宿主日志和 stderr，随后报告退出码 2。
 
 ## 接收宿主的结构化日志
 

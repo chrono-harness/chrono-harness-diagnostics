@@ -335,18 +335,56 @@ pub fn cli_events(
     #[serde(untagged, deny_unknown_fields)]
     enum Event {
         Diagnostic { diagnostic: String },
+        Trace { event: tracing_tunnel::TracingEvent },
+        InvalidArgument { invalid_argument: InvalidArgument },
         Finished { exit_code: u8 },
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct InvalidArgument {
+        argv_index: usize,
+        bytes: Vec<u8>,
     }
     cli_session(root, producer, operation, pid, || {
         ready
             .write_all(b"{\"ready\":true}\n")
             .and_then(|()| ready.flush())
             .map_err(io_failure)?;
+        let mut receiver = crate::trace_events::receiver();
         for event in serde_json::Deserializer::from_reader(input).into_iter::<Event>() {
             match event.map_err(|error| Failure::new("E_LOG_PROTOCOL", error.to_string()))? {
                 Event::Diagnostic {
                     diagnostic: message,
                 } => diagnostic(&message),
+                Event::Trace { event } => receiver
+                    .try_receive(event)
+                    .map_err(|error| Failure::new("E_LOG_PROTOCOL", error.to_string()))?,
+                Event::InvalidArgument {
+                    invalid_argument: argument,
+                } => {
+                    let error = Failure::new("E_USAGE", "arguments must be valid UTF-8.")
+                        .at("argv_index", argument.argv_index as u64)
+                        .at(
+                            "argument_index",
+                            serde_json::json!(argument.argv_index.checked_sub(1)),
+                        )
+                        .at("argument_bytes", serde_json::json!(argument.bytes));
+                    let publish = || {
+                        logging::failure(
+                            "cli.invalid_argument",
+                            &error.to_string(),
+                            &error.record(),
+                        )
+                    };
+                    publish().map_err(|e| Failure::new("E_RUNTIME_LOG", e.to_string()))?;
+                    let stderr = Logger::stderr(producer);
+                    stderr
+                        .run(publish)
+                        .map_err(|e| Failure::new("E_RUNTIME_LOG", e.to_string()))?;
+                    stderr.finish().map_err(|_| {
+                        Failure::new("E_RUNTIME_LOG", "cannot publish invalid argument to stderr")
+                    })?;
+                }
                 Event::Finished { exit_code } => return Ok(exit_code),
             }
         }
