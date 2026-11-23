@@ -1,4 +1,4 @@
-use chrono_diagnostics::runtime;
+use chrono_diagnostics::{runtime, trace_events};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
@@ -30,6 +30,25 @@ fn main() -> ExitCode {
                 stdout,
             ));
         }
+        [command, root, producer] if command == "trace-events-v1" => {
+            let Some(producer) = producer.to_str() else {
+                eprintln!("trace-events-v1 requires a UTF-8 producer");
+                return ExitCode::from(2);
+            };
+            drop(stdout);
+            return match trace_events::serve(
+                Path::new(root),
+                producer,
+                io::BufReader::new(io::stdin()),
+                io::stdout(),
+            ) {
+                Ok(status) => ExitCode::from(status),
+                Err(error) => {
+                    eprintln!("trace-events-v1: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         [command, root] if command == "expire-logs-v1" => {
             match runtime::maintain(Path::new(root)) {
                 Ok(result) => {
@@ -47,7 +66,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: chrono-diagnostics expire-logs-v1 ROOT | cli-events-v1 ROOT PRODUCER OPERATION PID"
+                "usage: chrono-diagnostics expire-logs-v1 ROOT | trace-events-v1 ROOT PRODUCER | cli-events-v1 ROOT PRODUCER OPERATION PID"
             );
             return ExitCode::from(2);
         }

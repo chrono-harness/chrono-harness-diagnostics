@@ -314,6 +314,10 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, context: LayerContext<'_, S>) {
+        // A replaying dispatcher can submit events directly without calling enabled.
+        if *event.metadata().level() > self.max_level {
+            return;
+        }
         let mut fields = Fields::default();
         event.record(&mut fields);
         let mut inherited = Context::new();
