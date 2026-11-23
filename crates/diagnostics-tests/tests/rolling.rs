@@ -512,3 +512,56 @@ fn missing_or_malformed_completion_never_publishes_a_finished_event() {
         assert!(rows.iter().all(|r| r["event"] != "cli.finished"));
     }
 }
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn external_cli_records_producer_spans_and_invalid_bytes_in_the_same_lifecycle() {
+    let fixture = Fixture::new();
+    fixture.policy(65536, 3, "debug");
+    let emitted = [
+        serde_json::json!({"event":{"new_call_site":{"id":1,"kind":"span","name":"attempt","level":"info","target":"cache","fields":["attempt"]}}}),
+        serde_json::json!({"event":{"new_call_site":{"id":2,"kind":"event","name":"run","level":"debug","target":"cache","fields":["event_id"]}}}),
+        serde_json::json!({"event":{"new_span":{"id":11,"metadata_id":1,"values":{"attempt":{"string":"first"}}}}}),
+        serde_json::json!({"event":{"span_entered":{"id":11}}}),
+        serde_json::json!({"event":{"new_event":{"metadata_id":2,"values":{"event_id":{"string":"cache.probe"}}}}}),
+        serde_json::json!({"event":{"span_exited":{"id":11}}}),
+        serde_json::json!({"invalid_argument":{"argv_index":2,"bytes":[201,255]}}),
+        serde_json::json!({"exit_code":2}),
+    ];
+    let mut input = Vec::new();
+    for item in emitted {
+        serde_json::to_writer(&mut input, &item).unwrap();
+        input.push(b'\n');
+    }
+    let mut ready = Vec::new();
+    assert_eq!(
+        runtime::cli_events(
+            &fixture.0,
+            "chrono-cache",
+            "plan",
+            7543,
+            input.as_slice(),
+            &mut ready
+        ),
+        2
+    );
+    let rows = records(&fixture.0.join(".chrono-harness/state/logs"));
+    assert_eq!(
+        rows.iter()
+            .map(|row| row["event"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "cli.started",
+            "cache.probe",
+            "cli.invalid_argument",
+            "cli.finished"
+        ]
+    );
+    assert_eq!(rows[1]["context"]["pid"], 7543);
+    assert_eq!(rows[1]["context"]["attempt"], "first");
+    assert_eq!(
+        rows[2]["error"]["error"]["context"]["argument_bytes"],
+        serde_json::json!([201, 255])
+    );
+    assert_eq!(rows[2]["error"]["error"]["context"]["argv_index"], 2);
+}

@@ -101,6 +101,10 @@ impl<R: BufRead, W: Write> Write for ExplicitSink<R, W> {
     }
 }
 
+pub(super) fn receiver() -> TracingEventReceiver {
+    TracingEventReceiver::new(Default::default(), Default::default(), Default::default())
+}
+
 pub fn serve(
     root: &Path,
     producer: &str,
@@ -121,8 +125,7 @@ pub fn serve(
     };
     channel.lock().unwrap().send(Reply::Ready)?;
     let stream = logger.run(|| -> io::Result<()> {
-        let mut receiver =
-            TracingEventReceiver::new(Default::default(), Default::default(), Default::default());
+        let mut receiver = receiver();
         loop {
             let request = channel.lock().unwrap().read()?;
             match request {
