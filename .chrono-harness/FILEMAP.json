@@ -270,7 +270,11 @@
       "owner": "host",
       "surface": "documentation",
       "cost": "unmeasured",
-      "edges": []
+      "edges": [],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
     },
     {
       "path": "check.sh",
@@ -682,5 +686,6 @@
       "timeout_seconds": 600,
       "output_limit_bytes": 2097152
     }
-  }
+  },
+  "require_new_file_classification": true
 }
