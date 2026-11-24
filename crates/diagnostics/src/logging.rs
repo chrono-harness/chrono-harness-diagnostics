@@ -96,16 +96,7 @@ impl RecordedError for LogFailure {
             } => {
                 let mut context = Context::new();
                 context.insert("observed_fields".into(), observed_fields.clone().into());
-                (
-                    "E_LOG_JSON",
-                    Some(Box::new(ErrorNode::new(
-                        std::any::type_name::<serde_json::Error>().into(),
-                        "native".into(),
-                        source.to_string(),
-                        Context::new(),
-                    ))),
-                    context,
-                )
+                ("E_LOG_JSON", Some(Box::new(source.error_node())), context)
             }
             Self::Time(source) => (
                 "E_LOG_TIME",

@@ -353,7 +353,9 @@ pub fn cli_events(
             .map_err(io_failure)?;
         let mut receiver = crate::trace_events::receiver();
         for event in serde_json::Deserializer::from_reader(input).into_iter::<Event>() {
-            match event.map_err(|error| Failure::new("E_LOG_PROTOCOL", error.to_string()))? {
+            match event
+                .map_err(|error| Failure::wrap("E_LOG_PROTOCOL", error.to_string(), error))?
+            {
                 Event::Diagnostic(message) => diagnostic(&message),
                 Event::Trace(event) => receiver
                     .try_receive(event)

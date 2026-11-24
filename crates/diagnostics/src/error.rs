@@ -85,13 +85,38 @@ fn io_kind(error: &io::Error) -> String {
         .unwrap_or_else(|| format!("{:?}", error.kind()))
 }
 
+impl RecordedError for serde_json::Error {
+    fn error_node(&self) -> ErrorNode {
+        let context = [
+            ("category".into(), format!("{:?}", self.classify()).into()),
+            ("line".into(), self.line().into()),
+            ("column".into(), self.column().into()),
+        ]
+        .into_iter()
+        .collect();
+        ErrorNode::new(
+            std::any::type_name::<Self>().into(),
+            "native".into(),
+            self.to_string(),
+            context,
+        )
+    }
+}
+
 pub(crate) fn io_error_node(error: &io::Error) -> ErrorNode {
     let mut context = Context::new();
     let kind = io_kind(error);
     context.insert("kind".into(), kind.clone().into());
-    let recorded = error
-        .get_ref()
-        .and_then(|source| source.downcast_ref::<Failure>());
+    let recorded = error.get_ref().and_then(|source| {
+        source
+            .downcast_ref::<Failure>()
+            .map(RecordedError::error_node)
+            .or_else(|| {
+                source
+                    .downcast_ref::<serde_json::Error>()
+                    .map(RecordedError::error_node)
+            })
+    });
     if error.get_ref().is_some_and(|source| {
         source
             .downcast_ref::<WriterError>()
@@ -105,7 +130,7 @@ pub(crate) fn io_error_node(error: &io::Error) -> ErrorNode {
         format!("io::{kind}"),
         error.to_string(),
         context,
-        recorded.map(|source| Box::new(source.error_node())),
+        recorded.map(Box::new),
         error.raw_os_error().map(i64::from),
         None,
         Vec::new(),
