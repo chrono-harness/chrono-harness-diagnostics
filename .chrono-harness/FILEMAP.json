@@ -1,0 +1,686 @@
+{
+  "schema_version": 2,
+  "status": "proposed",
+  "files": [
+    {
+      "path": ".chrono-harness/.gitignore",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".chrono-harness/FILEMAP.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".chrono-harness/USAGE.md",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".chrono-harness/ci/check.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".chrono-harness/ci/install.sh",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": ".chrono-harness/ci/units.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".chrono-harness/config.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".chrono-harness/judges.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".chrono-harness/pr.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".chrono-harness/projects.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".chrono-harness/rules.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".chrono-harness/template-answers.yml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".chrono-harness/workflow.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".chrono-harness/worktree.json",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".config/mise/conf.d/chrono-harness.toml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug.yml",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/documentation.yml",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/enhancement.yml",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/question.yml",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".github/workflows/check.yml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": ".gitignore",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": "AGENTS.md",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": [],
+      "symlink": "CLAUDE.md"
+    },
+    {
+      "path": "CLAUDE.md",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": "README.md",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": "check.sh",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics-tests/Cargo.lock",
+      "owner": "diagnostics-tests",
+      "surface": "test",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics-tests/Cargo.toml",
+      "owner": "diagnostics-tests",
+      "surface": "test",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics-tests/tests/records.rs",
+      "owner": "diagnostics-tests",
+      "surface": "test",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics-tests/tests/rolling.rs",
+      "owner": "diagnostics-tests",
+      "surface": "test",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics-tests/tests/verified_rolling.rs",
+            "operation": "verify.diagnostics-rolling-tests"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/diagnostics-tests/tests/support/log_writer.rs",
+      "owner": "diagnostics-tests",
+      "surface": "test",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics-tests/tests/verified_error.rs",
+      "owner": "diagnostics-tests",
+      "surface": "test",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics-tests/tests/verified_error.rs",
+            "operation": "verify.diagnostics-error-tests"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/diagnostics-tests/tests/verified_rolling.rs",
+      "owner": "diagnostics-tests",
+      "surface": "test",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics-tests/tests/verified_rolling.rs",
+            "operation": "verify.diagnostics-rolling-tests"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/diagnostics-tests/tests/verified_runtime.rs",
+      "owner": "diagnostics-tests",
+      "surface": "test",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics-tests/tests/verified_runtime.rs",
+            "operation": "verify.diagnostics-runtime-tests"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/diagnostics/Cargo.lock",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics/Cargo.toml",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics/src/error.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics/src/lib.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics/src/logging.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics/src/main.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics/src/rolling.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics/src/verified_rolling.rs",
+            "operation": "verify.diagnostics-rolling"
+          },
+          {
+            "path": "crates/diagnostics-tests/tests/verified_rolling.rs",
+            "operation": "verify.diagnostics-rolling-tests"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/diagnostics/src/runtime.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics/src/verified_runtime.rs",
+            "operation": "verify.diagnostics-runtime"
+          },
+          {
+            "path": "crates/diagnostics-tests/tests/verified_runtime.rs",
+            "operation": "verify.diagnostics-runtime-tests"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/diagnostics/src/trace_events.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    },
+    {
+      "path": "crates/diagnostics/src/verified_error.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics/src/verified_error.rs",
+            "operation": "verify.diagnostics-error"
+          },
+          {
+            "path": "crates/diagnostics-tests/tests/verified_error.rs",
+            "operation": "verify.diagnostics-error-tests"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/diagnostics/src/verified_rolling.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics/src/verified_rolling.rs",
+            "operation": "verify.diagnostics-rolling"
+          },
+          {
+            "path": "crates/diagnostics-tests/tests/verified_rolling.rs",
+            "operation": "verify.diagnostics-rolling-tests"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/diagnostics/src/verified_runtime.rs",
+      "owner": "diagnostics",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics/src/verified_runtime.rs",
+            "operation": "verify.diagnostics-runtime"
+          },
+          {
+            "path": "crates/diagnostics-tests/tests/verified_runtime.rs",
+            "operation": "verify.diagnostics-runtime-tests"
+          }
+        ]
+      }
+    },
+    {
+      "path": "docs/licenses/methodology-attribution.md",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": "docs/licenses/trureturing-Apache-2.0.txt",
+      "owner": "host",
+      "surface": "documentation",
+      "cost": "unmeasured",
+      "edges": []
+    },
+    {
+      "path": "rust-toolchain.toml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ]
+    }
+  ],
+  "project_edges": [],
+  "cost_models": {
+    "unmeasured": {
+      "cpu_ms": null,
+      "wall_ms": null,
+      "peak_rss_bytes": null,
+      "io_bytes": null,
+      "basis": "unknown"
+    }
+  },
+  "test_costs": [
+    {
+      "test": "diagnostics-tests",
+      "cost": "unmeasured"
+    }
+  ],
+  "execution_plans": {
+    "test:diagnostics-tests": {
+      "operations": [
+        "verify.diagnostics-error",
+        "verify.diagnostics-rolling",
+        "verify.diagnostics-runtime",
+        "verify.diagnostics-error-tests",
+        "verify.diagnostics-rolling-tests",
+        "verify.diagnostics-runtime-tests",
+        "diagnostics.owner-check"
+      ],
+      "timeout_seconds": 600,
+      "output_limit_bytes": 2097152
+    }
+  }
+}
