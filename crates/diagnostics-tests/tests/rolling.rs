@@ -519,9 +519,9 @@ fn external_cli_records_producer_spans_and_invalid_bytes_in_the_same_lifecycle()
     let fixture = Fixture::new();
     fixture.policy(65536, 3, "debug");
     let emitted = [
-        serde_json::json!({"event":{"new_call_site":{"id":1,"kind":"span","name":"attempt","level":"info","target":"cache","fields":["attempt"]}}}),
+        serde_json::json!({"event":{"new_call_site":{"id":1,"kind":"span","name":"attempt","level":"info","target":"cache","fields":["attempt","child_pid"]}}}),
         serde_json::json!({"event":{"new_call_site":{"id":2,"kind":"event","name":"run","level":"debug","target":"cache","fields":["event_id"]}}}),
-        serde_json::json!({"event":{"new_span":{"id":11,"metadata_id":1,"values":{"attempt":{"string":"first"}}}}}),
+        serde_json::json!({"event":{"new_span":{"id":11,"metadata_id":1,"values":{"attempt":{"string":"first"},"child_pid":{"u_int":17319}}}}}),
         serde_json::json!({"event":{"span_entered":{"id":11}}}),
         serde_json::json!({"event":{"new_event":{"metadata_id":2,"values":{"event_id":{"string":"cache.probe"}}}}}),
         serde_json::json!({"event":{"span_exited":{"id":11}}}),
@@ -559,6 +559,7 @@ fn external_cli_records_producer_spans_and_invalid_bytes_in_the_same_lifecycle()
     );
     assert_eq!(rows[1]["context"]["pid"], 7543);
     assert_eq!(rows[1]["context"]["attempt"], "first");
+    assert_eq!(rows[1]["context"]["child_pid"], 17319);
     assert_eq!(
         rows[2]["error"]["error"]["context"]["argument_bytes"],
         serde_json::json!([201, 255])

@@ -332,12 +332,13 @@ pub fn cli_events(
     mut ready: impl Write,
 ) -> u8 {
     #[derive(Deserialize)]
-    #[serde(untagged, deny_unknown_fields)]
+    #[serde(rename_all = "snake_case")]
     enum Event {
-        Diagnostic { diagnostic: String },
-        Trace { event: tracing_tunnel::TracingEvent },
-        InvalidArgument { invalid_argument: InvalidArgument },
-        Finished { exit_code: u8 },
+        Diagnostic(String),
+        #[serde(rename = "event")]
+        Trace(tracing_tunnel::TracingEvent),
+        InvalidArgument(InvalidArgument),
+        ExitCode(u8),
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -353,15 +354,11 @@ pub fn cli_events(
         let mut receiver = crate::trace_events::receiver();
         for event in serde_json::Deserializer::from_reader(input).into_iter::<Event>() {
             match event.map_err(|error| Failure::new("E_LOG_PROTOCOL", error.to_string()))? {
-                Event::Diagnostic {
-                    diagnostic: message,
-                } => diagnostic(&message),
-                Event::Trace { event } => receiver
+                Event::Diagnostic(message) => diagnostic(&message),
+                Event::Trace(event) => receiver
                     .try_receive(event)
                     .map_err(|error| Failure::new("E_LOG_PROTOCOL", error.to_string()))?,
-                Event::InvalidArgument {
-                    invalid_argument: argument,
-                } => {
+                Event::InvalidArgument(argument) => {
                     let error = Failure::new("E_USAGE", "arguments must be valid UTF-8.")
                         .at("argv_index", argument.argv_index as u64)
                         .at(
@@ -385,7 +382,7 @@ pub fn cli_events(
                         Failure::new("E_RUNTIME_LOG", "cannot publish invalid argument to stderr")
                     })?;
                 }
-                Event::Finished { exit_code } => return Ok(exit_code),
+                Event::ExitCode(exit_code) => return Ok(exit_code),
             }
         }
         Err(Failure::new(
