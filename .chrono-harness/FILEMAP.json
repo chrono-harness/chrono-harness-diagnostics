@@ -510,7 +510,20 @@
           "kind": "test-execution",
           "to": "test:diagnostics-tests"
         }
-      ]
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics/src/verified_runtime.rs",
+            "operation": "verify.diagnostics-runtime"
+          },
+          {
+            "path": "crates/diagnostics-tests/tests/verified_runtime.rs",
+            "operation": "verify.diagnostics-runtime-tests"
+          }
+        ]
+      }
     },
     {
       "path": "crates/diagnostics/src/main.rs",

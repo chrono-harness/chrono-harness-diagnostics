@@ -1,22 +1,105 @@
+//! Structured tracing records and their explicit sink.
+#[cfg(not(verus_keep_ghost))]
+use crate::verus;
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+verus! {
+
+pub(crate) enum ReservedFailure<V, E> {
+    Field(&'static str, V),
+    Decode(E),
+}
+
+pub(crate) open spec fn text_or_default<V>(input: Option<Result<String, V>>, fallback: &str, text: String) -> bool {
+    match input {
+        None => text@ == fallback@,
+        Some(Ok(value)) => text == value,
+        Some(Err(_)) => false,
+    }
+}
+
+/// Select the first field error and interpret error JSON only after the text fields succeed.
+pub(crate) fn resolve_reserved<V, R, E, P>(
+    identity: Option<Result<String, V>>, message: Option<Result<String, V>>,
+    error: Option<Result<String, V>>, parse: P,
+) -> (out: Result<(String, String, Option<R>), ReservedFailure<V, E>>)
+    where P: FnOnce(String) -> Result<R, E>,
+    requires forall|raw: String| parse.requires((raw,)),
+    ensures
+        match (identity, message, error) {
+            (Some(Err(value)), _, _) => out == Err::<(String, String, Option<R>), _>(ReservedFailure::<V, E>::Field("event_id", value)),
+            (_, Some(Err(value)), _) => out == Err::<(String, String, Option<R>), _>(ReservedFailure::<V, E>::Field("message", value)),
+            (_, _, Some(Err(value))) => out == Err::<(String, String, Option<R>), _>(ReservedFailure::<V, E>::Field("chrono_error", value)),
+            (id, msg, raw) => match out {
+                Ok((i, m, r)) => text_or_default(id, "tracing.external", i) && text_or_default(msg, "", m)
+                    && match (raw, r) {
+                        (None, None) => true,
+                        (Some(Ok(text)), Some(record)) => parse.ensures((text,), Ok::<R, E>(record)),
+                        _ => false,
+                    },
+                Err(ReservedFailure::Decode(failure)) => match raw {
+                    Some(Ok(text)) => parse.ensures((text,), Err::<R, E>(failure)),
+                    _ => false,
+                },
+                _ => false,
+            },
+        },
+{
+    let id = match identity {
+        None => "tracing.external".to_string(),
+        Some(Ok(text)) => text,
+        Some(Err(value)) => return Err(ReservedFailure::Field("event_id", value)),
+    };
+    let msg = match message {
+        None => "".to_string(),
+        Some(Ok(text)) => text,
+        Some(Err(value)) => return Err(ReservedFailure::Field("message", value)),
+    };
+    let record = match error {
+        None => None,
+        Some(Err(value)) => return Err(ReservedFailure::Field("chrono_error", value)),
+        Some(Ok(text)) => match parse(text) {
+            Ok(parsed) => Some(parsed),
+            Err(failure) => return Err(ReservedFailure::Decode(failure)),
+        },
+    };
+    Ok((id, msg, record))
+}
+
+}
+
+#[cfg(not(verus_keep_ghost))]
 use crate::error::{Context, ErrorNode, ErrorRecord, RecordedError, io_error_node};
+#[cfg(not(verus_keep_ghost))]
 use serde::{Deserialize, Serialize};
+#[cfg(not(verus_keep_ghost))]
 use serde_json::{Map, Value};
+#[cfg(not(verus_keep_ghost))]
 use std::error::Error;
+#[cfg(not(verus_keep_ghost))]
 use std::fmt;
+#[cfg(not(verus_keep_ghost))]
 use std::io::{self, Write};
+#[cfg(not(verus_keep_ghost))]
 use std::sync::{Arc, Mutex};
+#[cfg(not(verus_keep_ghost))]
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+#[cfg(not(verus_keep_ghost))]
 pub use tracing::Level;
+#[cfg(not(verus_keep_ghost))]
 use tracing::{
     Dispatch, Event, Metadata, Subscriber,
     field::{Field, Visit},
     span::{Attributes, Id, Record},
 };
+#[cfg(not(verus_keep_ghost))]
 use tracing_subscriber::{
     Layer, Registry, layer::Context as LayerContext, prelude::*, registry::LookupSpan,
 };
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg(not(verus_keep_ghost))]
 pub enum LogSchema {
     #[serde(rename = "chrono-log/v1")]
     V1,
@@ -24,6 +107,7 @@ pub enum LogSchema {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(not(verus_keep_ghost))]
 pub struct LogRecord {
     pub schema: LogSchema,
     pub timestamp: String,
@@ -38,12 +122,14 @@ pub struct LogRecord {
 }
 
 #[derive(Debug)]
+#[cfg(not(verus_keep_ghost))]
 pub enum LogIoPhase {
     Write,
     Flush,
 }
 
 #[derive(Debug)]
+#[cfg(not(verus_keep_ghost))]
 pub enum LogFailure {
     Io {
         source: io::Error,
@@ -68,6 +154,7 @@ pub enum LogFailure {
     },
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl RecordedError for LogFailure {
     fn error_node(&self) -> ErrorNode {
         let (code, source, context) = match self {
@@ -145,12 +232,14 @@ impl RecordedError for LogFailure {
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl RecordedError for Arc<LogFailure> {
     fn error_node(&self) -> ErrorNode {
         self.as_ref().error_node()
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl fmt::Display for LogFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -166,6 +255,7 @@ impl fmt::Display for LogFailure {
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl Error for LogFailure {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
@@ -180,8 +270,10 @@ impl Error for LogFailure {
 }
 
 #[derive(Default)]
+#[cfg(not(verus_keep_ghost))]
 struct Fields(Map<String, Value>);
 
+#[cfg(not(verus_keep_ghost))]
 impl Visit for Fields {
     fn record_bool(&mut self, field: &Field, value: bool) {
         self.0.insert(field.name().into(), value.into());
@@ -221,6 +313,7 @@ impl Visit for Fields {
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 struct Sink<W> {
     writer: W,
     failures: Vec<Arc<LogFailure>>,
@@ -228,26 +321,25 @@ struct Sink<W> {
     finished: bool,
 }
 
+#[cfg(not(verus_keep_ghost))]
 struct LogLayer<W> {
     producer: String,
     max_level: Level,
     sink: Arc<Mutex<Sink<W>>>,
 }
 
-fn take_text(
+#[cfg(not(verus_keep_ghost))]
+fn take_reserved(
     fields: &mut Map<String, Value>,
     key: &'static str,
-) -> Result<Option<String>, LogFailure> {
-    match fields.remove(key) {
-        None => Ok(None),
-        Some(Value::String(text)) => Ok(Some(text)),
-        Some(observed) => Err(LogFailure::InvalidField {
-            field: key,
-            observed,
-        }),
-    }
+) -> Option<Result<String, Value>> {
+    fields.remove(key).map(|value| match value {
+        Value::String(text) => Ok(text),
+        other => Err(other),
+    })
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl<W: Write> LogLayer<W> {
     fn publish(&self, record: Result<LogRecord, LogFailure>) {
         let mut sink = self.sink.lock().expect("diagnostic sink mutex");
@@ -291,6 +383,7 @@ impl<W: Write> LogLayer<W> {
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl<S, W> Layer<S> for LogLayer<W>
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
@@ -332,17 +425,23 @@ where
             }
         }
         self.publish((|| {
-            let identity =
-                take_text(&mut fields.0, "event_id")?.unwrap_or_else(|| "tracing.external".into());
-            let message = take_text(&mut fields.0, "message")?.unwrap_or_default();
-            let error = take_text(&mut fields.0, "chrono_error")?
-                .map(|raw| {
+            let (identity, message, error) = resolve_reserved(
+                take_reserved(&mut fields.0, "event_id"),
+                take_reserved(&mut fields.0, "message"),
+                take_reserved(&mut fields.0, "chrono_error"),
+                |raw| {
                     serde_json::from_str(&raw).map_err(|source| LogFailure::Json {
                         source,
                         observed_fields: Map::from_iter([("chrono_error".into(), raw.into())]),
                     })
-                })
-                .transpose()?;
+                },
+            )
+            .map_err(|failure| match failure {
+                ReservedFailure::Field(field, observed) => {
+                    LogFailure::InvalidField { field, observed }
+                }
+                ReservedFailure::Decode(error) => error,
+            })?;
             fields
                 .0
                 .insert("target".into(), event.metadata().target().into());
@@ -365,6 +464,7 @@ where
 
 /// Keep the logger until all instrumented work joins, then inspect finish().
 /// A dispatcher clone is the explicit handoff for another thread or task.
+#[cfg(not(verus_keep_ghost))]
 pub struct Logger<W> {
     dispatch: Dispatch,
     // tracing-core 0.1.36's single-dispatch fast path registers new callsites
@@ -376,6 +476,7 @@ pub struct Logger<W> {
     sink: Arc<Mutex<Sink<W>>>,
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl<W: Write + Send + 'static> Logger<W> {
     pub fn new(producer: impl Into<String>, max_level: Level, writer: W) -> Self {
         let sink = Arc::new(Mutex::new(Sink {
@@ -430,6 +531,7 @@ impl<W: Write + Send + 'static> Logger<W> {
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl Logger<io::Stderr> {
     pub fn stderr(producer: impl Into<String>) -> Self {
         Self::new(producer, Level::INFO, io::stderr())
@@ -437,11 +539,13 @@ impl Logger<io::Stderr> {
 }
 
 /// Publish an already structured domain failure through the same tracing layer.
+#[cfg(not(verus_keep_ghost))]
 pub fn failure(event: &str, message: &str, record: &ErrorRecord) -> Result<(), serde_json::Error> {
     record_error(Level::ERROR, event, message, record)
 }
 
 /// Recovery and handling events keep their original error at the actual event level.
+#[cfg(not(verus_keep_ghost))]
 pub fn record_error(
     level: Level,
     event: &str,

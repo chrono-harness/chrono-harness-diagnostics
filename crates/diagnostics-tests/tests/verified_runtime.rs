@@ -290,3 +290,120 @@ fn write_then_flush_appends_to_the_actual_previous_state() {
 }
 
 }
+
+#[cfg(verus_keep_ghost)]
+verus! {
+use policy::logging::{resolve_reserved, ReservedFailure};
+
+// Independent expectations cover arbitrary payloads, including the error selected
+// before a later invalid value and propagation of the decoder's own result.
+fn reserved_field_expectations(id: String, msg: String, raw: String, bad: u64) {
+    let decode = |s: String| -> (out: Result<String, String>)
+        ensures out == Ok::<String, String>(s),
+    { Ok(s) };
+    let reject = |s: String| -> (out: Result<String, String>)
+        ensures out == Err::<String, String>(s),
+    { Err(s) };
+    let absent = resolve_reserved::<u64, _, _, _>(None, None, None, decode);
+    assert(match absent {
+        Ok((i, m, e)) => i@ == "tracing.external"@ && m@ == ""@ && e.is_none(),
+        _ => false,
+    });
+    let all_bad = resolve_reserved(Some(Err(bad)), Some(Err(1u64)), Some(Err(2u64)), decode);
+    assert(match all_bad { Err(ReservedFailure::Field(key, v)) => key == "event_id" && v == bad, _ => false });
+    let two_bad = resolve_reserved(None, Some(Err(bad)), Some(Err(2u64)), decode);
+    assert(match two_bad { Err(ReservedFailure::Field(key, v)) => key == "message" && v == bad, _ => false });
+    let wrong = resolve_reserved(None, None, Some(Err(bad)), decode);
+    assert(match wrong { Err(ReservedFailure::Field(key, v)) => key == "chrono_error" && v == bad, _ => false });
+    let ghost original_id = id;
+    let ghost original_msg = msg;
+    let ghost original_raw = raw;
+    let accepted = resolve_reserved::<u64, _, _, _>(Some(Ok(id)), Some(Ok(msg)), Some(Ok(raw.clone())), decode);
+    assert(match accepted {
+        Ok((i, m, Some(record))) => i == original_id && m == original_msg && record == original_raw,
+        _ => false,
+    });
+    let rejected = resolve_reserved::<u64, _, _, _>(None, None, Some(Ok(raw)), reject);
+    assert(match rejected { Err(ReservedFailure::Decode(reason)) => reason == original_raw, _ => false });
+}
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn reserved_fields_reach_the_writer_or_report_the_first_original_failure() {
+    use chrono_diagnostics::error::{Failure, RecordedError};
+    use chrono_diagnostics::logging::{LogFailure, LogRecord, Logger};
+    use serde_json::json;
+    use std::io::{Read, Seek};
+    let path = std::env::temp_dir().join(format!("chrono-reserved-{}.jsonl", std::process::id()));
+    let mut reader = std::fs::OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+    let logger = Logger::new(
+        "reserved",
+        tracing::Level::INFO,
+        reader.try_clone().unwrap(),
+    );
+    let original = Failure::new("E_INPUT", "original").record();
+    let encoded = serde_json::to_string(&original).unwrap();
+    logger.run(|| {
+        tracing::info!(custom = 7u64);
+        tracing::info!(
+            event_id = "explicit",
+            message = "本文",
+            chrono_error = encoded.as_str()
+        );
+        tracing::info!(event_id = 11u64, message = true, chrono_error = 12u64);
+        tracing::info!(message = false, chrono_error = 13u64);
+        tracing::info!(chrono_error = 14u64);
+        tracing::info!(chrono_error = "{");
+        tracing::info!(event_id = "", message = "");
+    });
+    let failures = logger.finish().unwrap_err();
+    assert_eq!(failures.len(), 4);
+    for (failure, (name, value)) in failures.iter().zip([
+        ("event_id", json!(11)),
+        ("message", json!(false)),
+        ("chrono_error", json!(14)),
+    ]) {
+        let LogFailure::InvalidField { field, observed } = failure.as_ref() else {
+            panic!("expected a field error")
+        };
+        assert_eq!((*field, observed), (name, &value));
+        assert_eq!(failure.error_node().code, "E_LOG_FIELD");
+    }
+    let LogFailure::Json {
+        source,
+        observed_fields,
+    } = failures[3].as_ref()
+    else {
+        panic!("expected a decoder error")
+    };
+    assert!(source.is_eof());
+    assert_eq!(observed_fields.get("chrono_error"), Some(&json!("{")));
+    assert_eq!(failures[3].error_node().code, "E_LOG_JSON");
+    reader.rewind().unwrap();
+    let mut bytes = String::new();
+    reader.read_to_string(&mut bytes).unwrap();
+    let rows: Vec<LogRecord> = bytes
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        (&*rows[0].event, &*rows[0].message),
+        ("tracing.external", "")
+    );
+    assert_eq!(rows[0].fields["custom"], 7);
+    assert_eq!(rows[0].error, None);
+    assert_eq!((&*rows[1].event, &*rows[1].message), ("explicit", "本文"));
+    assert_eq!(rows[1].error, Some(original));
+    for name in ["event_id", "message", "chrono_error"] {
+        assert!(!rows[1].fields.contains_key(name));
+    }
+    assert_eq!((&*rows[2].event, &*rows[2].message), ("", ""));
+}
