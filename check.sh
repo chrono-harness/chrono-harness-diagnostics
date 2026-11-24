@@ -8,23 +8,41 @@ export TMPDIR="$scratch"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$scratch/cargo}"
 cargo fmt --check --manifest-path crates/diagnostics/Cargo.toml
 cargo fmt --check --manifest-path crates/diagnostics-tests/Cargo.toml
-cargo build --locked --manifest-path crates/diagnostics/Cargo.toml
+product=crates/diagnostics/Cargo.toml
+cargo build --locked --message-format=json-render-diagnostics --manifest-path "$product" > "$scratch/build.jsonl"
 cargo test --locked --manifest-path crates/diagnostics-tests/Cargo.toml
 
-prove() {
-  local label=$1 root=$2
-  local output="$scratch/$label.rlib"
-  "${VERUS:-verus}" --crate-type=lib --no-cheating --no-external-by-default --num-threads 2 \
-    --output-json --compile "--emit=link=$output,dep-info=$output.d" "$root" -o "$output" \
-    -Zchecksum-hash-algorithm=sha256 > "$scratch/proof.json" || { cat "$scratch/proof.json" >&2; return 1; }
-  cat "$scratch/proof.json"
-  jq -e '.verus.version == "0.2026.04.24.f8e1704" and
-    .verus.commit == "f8e17045c4ac17a02e566b8997070f2eecc255be" and
-    (."verification-results" | .success == true and ."is-verifying-entire-crate" == true and
-    ."encountered-error" == false and ."encountered-vir-error" == false and
-    .errors == 0 and .verified > 0)' "$scratch/proof.json" >/dev/null
-  test -s "$output" && test -s "$output.d"
+coverage_failure() {
+  echo "E_VERUS_COVERAGE: $*" >&2
+  exit 1
 }
+
+verifier=$(command -v "${VERUS:-verus}") || coverage_failure "verifier not found"
+
+prove() {
+  chrono-host-bootstrap run-compiler-proof "$scratch" "$1" "$verifier" "$2" ||
+    coverage_failure "$1: verifier execution failed"
+}
+
+admit_proof() {
+  local label=$1
+  shift
+  chrono-host-bootstrap collect-compiler-proof "$scratch" "$label" "$verifier" \
+    0.2026.04.24.f8e1704 f8e17045c4ac17a02e566b8997070f2eecc255be "$@" ||
+    coverage_failure "$label: required proof result was not admitted"
+}
+
+# Read the exact library selected by Cargo in the build of the tested executable.
+metadata=$(jq -ers --arg manifest "$(pwd -P)/$product" '
+  [.[] | select(.reason == "compiler-artifact" and .manifest_path == $manifest
+                 and .target.kind == ["lib"]) | .filenames[] | select(endswith(".rmeta"))]
+  | if length == 1 then .[0] else error("expected the product library") end
+' "$scratch/build.jsonl") || coverage_failure "native library was not identified"
+filename=${metadata##*/}
+stem=${filename#lib}
+stem=${metadata%/*}/${stem%.rmeta}
+chrono-host-bootstrap check-compiler-sources native "$stem" \
+  src/verified_error.rs src/error.rs src/verified_rolling.rs src/rolling.rs src/verified_runtime.rs src/runtime.rs || coverage_failure "native library differs from required sources"
 
 prove verify.diagnostics-error crates/diagnostics/src/verified_error.rs
 prove verify.diagnostics-rolling crates/diagnostics/src/verified_rolling.rs
@@ -32,3 +50,18 @@ prove verify.diagnostics-runtime crates/diagnostics/src/verified_runtime.rs
 prove verify.diagnostics-error-tests crates/diagnostics-tests/tests/verified_error.rs
 prove verify.diagnostics-rolling-tests crates/diagnostics-tests/tests/verified_rolling.rs
 prove verify.diagnostics-runtime-tests crates/diagnostics-tests/tests/verified_runtime.rs
+
+admit_proof verify.diagnostics-error crates/diagnostics/src/verified_error.rs
+admit_proof verify.diagnostics-rolling crates/diagnostics/src/verified_rolling.rs \
+  crates/diagnostics/src/rolling.rs
+admit_proof verify.diagnostics-runtime crates/diagnostics/src/verified_runtime.rs \
+  crates/diagnostics/src/runtime.rs
+admit_proof verify.diagnostics-error-tests crates/diagnostics-tests/tests/verified_error.rs \
+  crates/diagnostics-tests/tests/../../diagnostics/src/verified_error.rs
+admit_proof verify.diagnostics-rolling-tests crates/diagnostics-tests/tests/verified_rolling.rs \
+  crates/diagnostics-tests/tests/../../diagnostics/src/verified_rolling.rs \
+  crates/diagnostics-tests/tests/../../diagnostics/src/rolling.rs \
+  crates/diagnostics-tests/tests/rolling.rs
+admit_proof verify.diagnostics-runtime-tests crates/diagnostics-tests/tests/verified_runtime.rs \
+  crates/diagnostics-tests/tests/../../diagnostics/src/verified_runtime.rs \
+  crates/diagnostics-tests/tests/../../diagnostics/src/runtime.rs
