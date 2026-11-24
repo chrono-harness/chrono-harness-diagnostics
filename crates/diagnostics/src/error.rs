@@ -85,6 +85,35 @@ fn io_kind(error: &io::Error) -> String {
         .unwrap_or_else(|| format!("{:?}", error.kind()))
 }
 
+impl RecordedError for tracing_tunnel::ReceiveError {
+    fn error_node(&self) -> ErrorNode {
+        use tracing_tunnel::ReceiveError::*;
+        let mut context = Context::new();
+        let code = match self {
+            UnknownMetadataId(id) => {
+                context.insert("metadata_id".into(), (*id).into());
+                "tracing::UnknownMetadataId"
+            }
+            UnknownSpanId(id) => {
+                context.insert("span_id".into(), (*id).into());
+                "tracing::UnknownSpanId"
+            }
+            TooManyValues { max, actual } => {
+                context.insert("max".into(), (*max).into());
+                context.insert("actual".into(), (*actual).into());
+                "tracing::TooManyValues"
+            }
+            _ => "native",
+        };
+        ErrorNode::new(
+            std::any::type_name::<Self>().into(),
+            code.into(),
+            self.to_string(),
+            context,
+        )
+    }
+}
+
 impl RecordedError for serde_json::Error {
     fn error_node(&self) -> ErrorNode {
         let context = [
@@ -111,6 +140,11 @@ pub(crate) fn io_error_node(error: &io::Error) -> ErrorNode {
         source
             .downcast_ref::<Failure>()
             .map(RecordedError::error_node)
+            .or_else(|| {
+                source
+                    .downcast_ref::<tracing_tunnel::ReceiveError>()
+                    .map(RecordedError::error_node)
+            })
             .or_else(|| {
                 source
                     .downcast_ref::<serde_json::Error>()

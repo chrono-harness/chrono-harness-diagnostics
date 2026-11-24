@@ -359,7 +359,7 @@ pub fn cli_events(
                 Event::Diagnostic(message) => diagnostic(&message),
                 Event::Trace(event) => receiver
                     .try_receive(event)
-                    .map_err(|error| Failure::new("E_LOG_PROTOCOL", error.to_string()))?,
+                    .map_err(|error| Failure::wrap("E_LOG_PROTOCOL", error.to_string(), error))?,
                 Event::InvalidArgument(argument) => {
                     let error = Failure::new("E_USAGE", "arguments must be valid UTF-8.")
                         .at("argv_index", argument.argv_index as u64)
