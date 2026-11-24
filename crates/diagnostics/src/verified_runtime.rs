@@ -8,6 +8,10 @@ use vstd::prelude::*;
 #[path = "runtime.rs"]
 mod owner;
 
+#[cfg(verus_keep_ghost)]
+#[path = "logging.rs"]
+pub(crate) mod logging;
+
 verus! {
 
 pub open spec fn sequence_result<S, E, W, F>(
