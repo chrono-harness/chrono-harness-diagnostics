@@ -26,6 +26,33 @@ pub fn generation_expired(deadline: u64, observed: u64) -> (expired: bool)
     observed >= deadline
 }
 
+/// Before the first deadline digit, every writer header has the same prefix.
+pub fn staged_deadline(decoded: Option<u64>) -> (deadline: u64)
+    ensures deadline > 0,
+        match decoded { Some(n) if n > 0 => deadline == n, _ => deadline == 1 },
+{
+    match decoded { Some(n) if n > 0 => n, _ => 1 }
+}
+
+/// The witness is serialized by the writer itself. Even a decoder that
+/// accepts trailing bytes cannot authorize deleting those bytes.
+pub fn staged_header_matches(staged: &[u8], writer_header: &[u8]) -> (matches: bool)
+    ensures matches == (staged.len() <= writer_header.len()
+        && forall|i: int| 0 <= i < staged.len() ==> staged[i] == writer_header[i]),
+{
+    if staged.len() > writer_header.len() { return false; }
+    let mut i = 0usize;
+    while i < staged.len()
+        invariant i <= staged.len() <= writer_header.len(),
+            forall|j: int| 0 <= j < i ==> staged[j] == writer_header[j],
+        decreases staged.len() - i,
+    {
+        if staged[i] != writer_header[i] { return false; }
+        i += 1;
+    }
+    true
+}
+
 }
 #[cfg(not(verus_keep_ghost))]
 use std::{
@@ -239,9 +266,15 @@ impl RollingFile {
             File::open(&path)?
                 .take(HEADER_LIMIT + 1)
                 .read_to_end(&mut bytes)?;
-            if bytes.len() as u64 > HEADER_LIMIT
-                || (!GENERATION_PREFIX.starts_with(&bytes) && !bytes.starts_with(GENERATION_PREFIX))
-            {
+            // Closing the JSON object lets Serde recover a deadline even if
+            // the write stopped inside its digits. Compare the original bytes.
+            let mut decoder =
+                serde_json::Deserializer::from_reader(bytes.as_slice().chain(&b"}"[..]));
+            let decoded = Generation::deserialize(&mut decoder)
+                .ok()
+                .map(|g| g.deadline);
+            let canonical = Self::generation_header(staged_deadline(decoded))?;
+            if !staged_header_matches(&bytes, &canonical) {
                 return Err(invalid("unknown file at the log generation staging path"));
             }
             fs::remove_file(&path)?;
@@ -249,16 +282,21 @@ impl RollingFile {
         Ok(())
     }
 
-    fn write_expiring(&self, bytes: &[u8], keep: u64) -> io::Result<usize> {
-        let now = unix_seconds()?;
-        let deadline = generation_deadline(now, keep)
-            .ok_or_else(|| invalid("log deadline exceeds supported time range"))?;
+    fn generation_header(deadline: u64) -> io::Result<Vec<u8>> {
         let generation = Generation {
             schema: GENERATION_SCHEMA.into(),
             deadline,
         };
         let mut header = serde_json::to_vec(&generation).map_err(io::Error::other)?;
         header.push(b'\n');
+        Ok(header)
+    }
+
+    fn write_expiring(&self, bytes: &[u8], keep: u64) -> io::Result<usize> {
+        let now = unix_seconds()?;
+        let deadline = generation_deadline(now, keep)
+            .ok_or_else(|| invalid("log deadline exceeds supported time range"))?;
+        let header = Self::generation_header(deadline)?;
         let available = self.max_bytes.saturating_sub(header.len() as u64);
         if !crate::verified_rolling::record_fits(bytes.len() as u64, available) {
             return Err(invalid("log record and generation header exceed max_bytes"));
