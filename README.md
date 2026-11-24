@@ -19,3 +19,5 @@ Rust 结构化错误、运行日志和按创建期限滚动的文件日志。
 `chrono-diagnostics trace-events-v1 ROOT PRODUCER` 将调用方的 tracing 事件写入其显式日志流，并采用 ROOT 的日志级别、滚动和过期策略。通信使用 UTF-8 JSON，每行一条。就绪后 stdout 返回 `"ready"`。调用方向 stdin 发送 `{"event":EVENT}`，EVENT 使用 tracing-tunnel 0.1 的格式。每条事件处理完毕返回 `"accepted"`。发送 `"finish"` 后接收 `{"finished":[...]}`，等待进程退出。成功返回空数组和退出码 0，配置、协议或日志失败返回结构化错误记录和退出码 2。
 
 处理事件及结束时，stdout 上的 `{"write":"..."}` 或 `"flush"` 要求调用方写入或刷新它选择的日志流。完成操作后立即回传 `"ok"`，发生错误时回传 `{"error":{"native_code":28,"kind":"StorageFull","custom_source":false,"message":"..."}}`。没有系统错误码时填 null。日志在业务执行期间即可读取。业务程序自行发布原始输出和退出状态。
+
+发布 stderr 上的单次原生错误时，使用 `chrono-diagnostics trace-events-v1 --sink-only PRODUCER`。该模式只向调用方提供的流写入与刷新，按 INFO 级别生成标准事件。传入宿主 ROOT 时仍按宿主政策选择日志目标。

@@ -2,7 +2,7 @@
 //! The explicit writer is acknowledged by its owner so its original failure reaches Logger.
 use crate::{
     error::{ErrorRecord, ErrorSchema, Failure, RecordedError, WriterError},
-    logging::Level,
+    logging::{Level, Logger},
     runtime,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -106,14 +106,22 @@ pub(super) fn receiver() -> TracingEventReceiver {
 }
 
 pub fn serve(
-    root: &Path,
+    root: Option<&Path>,
     producer: &str,
     input: impl BufRead + Send + 'static,
     output: impl Write + Send + 'static,
 ) -> io::Result<u8> {
     let channel = Arc::new(Mutex::new(Channel { input, output }));
     let sink = ExplicitSink(channel.clone());
-    let logger = match runtime::logger(root, producer, Level::INFO, sink) {
+    let chosen = match root {
+        Some(root) => runtime::logger(root, producer, Level::INFO, sink),
+        None => Ok(Logger::new(
+            producer,
+            Level::INFO,
+            Box::new(sink) as Box<dyn Write + Send>,
+        )),
+    };
+    let logger = match chosen {
         Ok(logger) => logger,
         Err(error) => {
             channel
