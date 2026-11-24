@@ -707,6 +707,31 @@ fn malformed_trace_json_preserves_the_parser_error_location() {
 }
 
 #[test]
+fn unknown_tracing_ids_keep_the_receiver_error_and_reference() {
+    for (event, field, id) in [
+        (
+            json!({"new_span":{"id":1,"metadata_id":73,"values":{}}}),
+            "metadata_id",
+            73,
+        ),
+        (json!({"span_entered":{"id":91}}), "span_id", 91),
+    ] {
+        let (code, replies) = trace_session(&[json!({"event":event}), json!("ok")]);
+        assert_eq!(code, 2);
+        let error = &replies.last().unwrap()["finished"][0]["error"];
+        assert_eq!(error["code"], "E_LOG_PROTOCOL");
+        let node = &error["source"]["source"]["source"];
+        assert!(
+            node["type"]
+                .as_str()
+                .is_some_and(|name| name.ends_with("::ReceiveError")),
+            "{error}"
+        );
+        assert_eq!(node["context"][field], id);
+    }
+}
+
+#[test]
 fn trace_session_preserves_native_read_failure() {
     struct Denied;
     impl io::Read for Denied {
