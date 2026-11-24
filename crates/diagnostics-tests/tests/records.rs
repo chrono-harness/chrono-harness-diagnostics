@@ -694,6 +694,19 @@ fn truncated_trace_session_reports_the_missing_terminal_message() {
 }
 
 #[test]
+fn malformed_trace_json_preserves_the_parser_error_location() {
+    let (status, replies) = trace_input(io::Cursor::new(b"{bad}\n"));
+    assert_eq!(status, 2);
+    let protocol = &replies.last().unwrap()["finished"][0]["error"];
+    assert_eq!(protocol["code"], "E_LOG_PROTOCOL");
+    let parser = &protocol["source"]["source"]["source"];
+    assert_eq!(parser["type"], std::any::type_name::<serde_json::Error>());
+    assert_eq!(parser["context"]["line"], 1);
+    assert_eq!(parser["context"]["column"], 2);
+    assert_eq!(parser["context"]["category"], "Syntax");
+}
+
+#[test]
 fn trace_session_preserves_native_read_failure() {
     struct Denied;
     impl io::Read for Denied {
