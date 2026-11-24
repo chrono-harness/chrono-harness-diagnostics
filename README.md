@@ -6,6 +6,8 @@ Rust 结构化错误、运行日志和按创建期限滚动的文件日志。
 
 源码和测试取自 [ChronoAIProject/chrono-harness 的固定提交](https://github.com/ChronoAIProject/chrono-harness/tree/5f6892dfa2f73675a84e4ebdc3b06eb83b824d6e/crates/diagnostics)。
 
+本仓在 FILEMAP 启用了新增文件分类。新增文件与改动到的未分类逻辑需要登记实际证明根，纯资料登记为 data。未改动的旧逻辑可保留未知。
+
 ## 定时回收日志
 
 从本仓 Release 下载当前平台的 `chrono-diagnostics`，按同一 Release 的 `SHA256SUMS` 校验后安装到工作树外。宿主可运行 `chrono-diagnostics expire-logs-v1 ROOT` 回收该检出的到期日志，程序读取现有 `.chrono-harness/logging.json`。没有时间保留策略时，stdout 为 JSON `null`；否则返回 `removed`、`legacy`、`busy` 和 `errors`。成功或写入者正持锁时退出 0，单项删除失败时退出 1 并保留完整 JSON。配置、读取或结果发布失败时退出 2，诊断写入 stderr。
