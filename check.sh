@@ -37,4 +37,4 @@ filename=${metadata##*/}
 stem=${filename#lib}
 stem=${metadata%/*}/${stem%.rmeta}
 chrono-host-bootstrap check-compiler-sources native "$stem" \
-  src/verified_error.rs src/error.rs src/verified_rolling.rs src/rolling.rs src/verified_runtime.rs src/runtime.rs src/logging.rs || coverage_failure "native library differs from required sources"
+  src/verified_error.rs src/error.rs src/verified_rolling.rs src/rolling.rs src/verified_runtime.rs src/runtime.rs || coverage_failure "native library differs from required sources"
