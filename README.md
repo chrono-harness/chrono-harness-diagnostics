@@ -23,3 +23,15 @@ Rust 结构化错误、运行日志和按创建期限滚动的文件日志。
 处理事件及结束时，stdout 上的 `{"write":"..."}` 或 `"flush"` 要求调用方写入或刷新它选择的日志流。完成操作后立即回传 `"ok"`，发生错误时回传 `{"error":{"native_code":28,"kind":"StorageFull","custom_source":false,"message":"..."}}`。没有系统错误码时填 null。日志在业务执行期间即可读取。业务程序自行发布原始输出和退出状态。
 
 发布 stderr 上的单次原生错误时，使用 `chrono-diagnostics trace-events-v1 --sink-only PRODUCER`。该模式只向调用方提供的流写入与刷新，按 INFO 级别生成标准事件。传入宿主 ROOT 时仍按宿主政策选择日志目标。
+
+## 开发机检查原件
+
+本仓将本地检查准备、工作树输入、单元执行和汇总诊断的原件登记给已安装的 runner。保留窗口为 24 小时。需要长期保留的结果请在窗口内复制到持久存储。当前报告和活跃读者持有引用；结果已替换、读者已释放且期限届满后，维护会回收实际文件。采用前生成的旧文件需要按原生产者和最后使用方核对。
+
+在运行过本仓检查的长期主检出，开发者可在自己的 crontab 中加入以下条目，将绝对路径替换为本仓主检出。定时器每小时调用同一个 runner 维护请求。移除该条目即可取消定时维护。
+
+```cron
+0 * * * * cd '/absolute/path/to/chrono-harness-diagnostics' && .chrono-harness/bin/chrono-harness retention --host-root . --request .chrono-harness/maintain-checks.json >/dev/null
+```
+
+GitHub Actions 的单元原件保留 1 天。汇总归档随 GitHub 仓库设置滚动；采用时仓库配置为 90 天。
