@@ -1,7 +1,7 @@
 //! Replay an installed producer's tracing stream through the host's runtime logger.
 //! The explicit writer is acknowledged by its owner so its original failure reaches Logger.
 use crate::{
-    error::{ErrorRecord, ErrorSchema, Failure, RecordedError, WriterError},
+    error::{ErrorRecord, ErrorSchema, Failure, NativeIoError, RecordedError, WriterError},
     logging::{Level, Logger},
     runtime,
 };
@@ -147,7 +147,7 @@ pub fn serve(
     });
     let mut errors: Vec<_> = stream
         .err()
-        .map(|e| Failure::new("E_LOG_PROTOCOL", e.to_string()).record())
+        .map(|e| Failure::wrap("E_LOG_PROTOCOL", e.to_string(), NativeIoError::new(e)).record())
         .into_iter()
         .collect();
     if let Err(failures) = logger.finish() {

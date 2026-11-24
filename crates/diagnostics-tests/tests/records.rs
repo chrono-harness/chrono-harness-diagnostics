@@ -609,11 +609,15 @@ fn trace_session(requests: &[Value]) -> (u8, Vec<Value>) {
             bytes
         })
         .collect();
+    trace_input(io::Cursor::new(input))
+}
+
+fn trace_input(input: impl io::BufRead + Send + 'static) -> (u8, Vec<Value>) {
     let captured = Captured::default();
     let status = chrono_diagnostics::trace_events::serve(
         Some(std::path::Path::new("no-policy-fixture")),
         "explicit-writer",
-        io::Cursor::new(input),
+        input,
         captured.clone(),
     )
     .unwrap();
@@ -684,9 +688,30 @@ fn installed_traces_keep_context_filter_and_report_the_explicit_writer_failure()
 fn truncated_trace_session_reports_the_missing_terminal_message() {
     let (status, replies) = trace_session(&[]);
     assert_eq!(status, 2, "{replies:?}");
+    let failure = &replies.last().unwrap()["finished"][0]["error"];
+    assert_eq!(failure["code"], "E_LOG_PROTOCOL");
+    assert_eq!(failure["source"]["source"]["code"], "io::UnexpectedEof");
+}
+
+#[test]
+fn trace_session_preserves_native_read_failure() {
+    struct Denied;
+    impl io::Read for Denied {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::from_raw_os_error(13))
+        }
+    }
+
+    let (status, replies) = trace_input(io::BufReader::new(Denied));
+    assert_eq!(status, 2);
+    let failure = &replies.last().unwrap()["finished"][0]["error"];
+    assert_eq!(failure["code"], "E_LOG_PROTOCOL");
+    let original = &failure["source"]["source"];
+    assert_eq!(original["type"], "std::io::Error");
+    assert_eq!(original["native_code"], 13);
     assert_eq!(
-        replies.last().unwrap()["finished"][0]["error"]["code"],
-        "E_LOG_PROTOCOL"
+        original["message"],
+        io::Error::from_raw_os_error(13).to_string()
     );
 }
 
