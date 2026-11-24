@@ -36,8 +36,13 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             };
             drop(stdout);
+            let policy = if root == "--sink-only" {
+                None
+            } else {
+                Some(Path::new(root))
+            };
             return match trace_events::serve(
-                Path::new(root),
+                policy,
                 producer,
                 io::BufReader::new(io::stdin()),
                 io::stdout(),
@@ -66,7 +71,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: chrono-diagnostics expire-logs-v1 ROOT | trace-events-v1 ROOT PRODUCER | cli-events-v1 ROOT PRODUCER OPERATION PID"
+                "usage: chrono-diagnostics expire-logs-v1 ROOT | trace-events-v1 ROOT|--sink-only PRODUCER | cli-events-v1 ROOT PRODUCER OPERATION PID"
             );
             return ExitCode::from(2);
         }

@@ -611,7 +611,7 @@ fn trace_session(requests: &[Value]) -> (u8, Vec<Value>) {
         .collect();
     let captured = Captured::default();
     let status = chrono_diagnostics::trace_events::serve(
-        std::path::Path::new("no-policy-fixture"),
+        Some(std::path::Path::new("no-policy-fixture")),
         "explicit-writer",
         io::Cursor::new(input),
         captured.clone(),
@@ -687,5 +687,27 @@ fn truncated_trace_session_reports_the_missing_terminal_message() {
     assert_eq!(
         replies.last().unwrap()["finished"][0]["error"]["code"],
         "E_LOG_PROTOCOL"
+    );
+}
+
+#[test]
+fn explicit_only_traces_accept_a_sink_without_selecting_a_host_policy() {
+    let captured = Captured::default();
+    let status = chrono_diagnostics::trace_events::serve(
+        None,
+        "native-publication",
+        io::Cursor::new(b"\"finish\"\n\"ok\"\n"),
+        captured.clone(),
+    )
+    .unwrap();
+    assert_eq!(status, 0);
+    let replies = captured.0.lock().unwrap();
+    let values = serde_json::Deserializer::from_slice(&replies)
+        .into_iter::<Value>()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        values,
+        vec![json!("ready"), json!("flush"), json!({"finished":[]})]
     );
 }
