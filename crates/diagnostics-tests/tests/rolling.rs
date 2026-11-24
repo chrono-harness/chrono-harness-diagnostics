@@ -27,6 +27,19 @@ fn a_log_generation_expires_at_its_original_deadline() {
     expect_generation(owner::generation_deadline(u64::MAX - 1, 1) == Some(u64::MAX));
 }
 
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn only_writer_prefixes_can_be_removed() {
+    expect_generation(owner::staged_deadline(None) == 1);
+    expect_generation(owner::staged_deadline(Some(0)) == 1);
+    expect_generation(owner::staged_deadline(Some(u64::MAX)) == u64::MAX);
+    let header = [123u8, 125u8, 10u8];
+    expect_generation(owner::staged_header_matches(&[], &header));
+    expect_generation(owner::staged_header_matches(&[123u8], &header));
+    expect_generation(owner::staged_header_matches(&header, &header));
+    expect_generation(!owner::staged_header_matches(&[123u8, 10u8], &header));
+    expect_generation(!owner::staged_header_matches(&[123u8, 125u8, 10u8, 0u8], &header));
+}
+
 }
 
 #[cfg(not(verus_keep_ghost))]
@@ -260,6 +273,64 @@ fn idle_runtime_logs_expire_at_their_creation_deadline() {
     assert_eq!(report.legacy, 1);
     assert!(!current.exists());
     assert!(legacy.exists());
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn both_cleanup_paths_preserve_unknown_staging_bytes() {
+    let fixture = Fixture::new();
+    fixture.policy(4096, 3, "info");
+    let config = fixture.0.join(runtime::CONFIG_PATH);
+    let mut policy: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    policy["keep_seconds"] = json!(86400);
+    fs::write(config, serde_json::to_vec(&policy).unwrap()).unwrap();
+    let directory = fixture.0.join(".chrono-harness/state/logs");
+    let logger = runtime::configured_logger(&fixture.0, "fixture", io::sink())
+        .unwrap()
+        .unwrap();
+    logger.run(|| tracing::info!("create the adopted log family"));
+    logger.finish().unwrap();
+
+    let pending = directory.join("runtime.pending");
+    let member = directory.join("runtime.jsonl");
+    let header = |deadline: u64| {
+        format!("{{\"schema\":\"chrono-runtime-log-generation/v1\",\"deadline\":{deadline}}}\n")
+    };
+    for deadline in [1, 10, 86400, u64::MAX] {
+        let valid = header(deadline);
+        for cut in 0..=valid.len() {
+            fs::write(&pending, &valid.as_bytes()[..cut]).unwrap();
+            let report = runtime::maintain_at(&fixture.0, 1).unwrap().unwrap();
+            assert!(
+                report.errors.is_empty(),
+                "deadline={deadline}, cut={cut}: {:?}",
+                report.errors
+            );
+            assert!(!pending.exists());
+        }
+    }
+    let prefix = r#"{"schema":"chrono-runtime-log-generation/v1""#;
+    for bad in [
+        format!("{prefix}wrong"),
+        format!("{prefix},\"deadline\":18446744073709551616}}\n"),
+        format!("{prefix},\"deadline\":01}}\n"),
+        header(0),
+        format!("{}unrelated data\n", header(1)),
+    ] {
+        fs::write(&pending, &bad).unwrap();
+        fs::write(&member, header(1)).unwrap();
+        let report = runtime::maintain_at(&fixture.0, 1).unwrap().unwrap();
+        assert_eq!(report.removed, 1);
+        assert_eq!(report.errors.len(), 1);
+        assert!(report.errors[0].contains("runtime.pending"));
+        assert_eq!(fs::read(&pending).unwrap(), bad.as_bytes());
+        let logger = runtime::configured_logger(&fixture.0, "fixture", io::sink())
+            .unwrap()
+            .unwrap();
+        logger.run(|| tracing::info!("attempt to write while staging contains unknown bytes"));
+        assert!(logger.finish().is_err());
+        assert_eq!(fs::read(&pending).unwrap(), bad.as_bytes());
+    }
 }
 
 #[cfg(not(verus_keep_ghost))]
