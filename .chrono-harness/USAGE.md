@@ -14,4 +14,4 @@ Rust 结构化错误、运行日志和按创建期限滚动的文件日志。
 
 ## 本仓验证
 
-产品位于 [`crates/diagnostics`](../crates/diagnostics)。原生测试位于 [`crates/diagnostics-tests`](../crates/diagnostics-tests)。在仓库根目录运行 `mise exec -- ./check.sh` 执行本仓的检查。
+产品位于 [`crates/diagnostics`](../crates/diagnostics)。原生测试位于 [`crates/diagnostics-tests`](../crates/diagnostics-tests)。在仓库根目录运行 `mise exec -- ./check.sh` 执行本仓的检查。 本地和 GitHub 使用同一份 Git DELTA、证明根与原生测试登记。单元收集六项 Verus 验证和原生测试回执，汇总作业读取原件。
