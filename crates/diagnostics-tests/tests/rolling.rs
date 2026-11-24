@@ -249,7 +249,8 @@ fn idle_runtime_logs_expire_at_their_creation_deadline() {
     let legacy = directory.join("runtime.2.jsonl");
     fs::write(&legacy, b"{\"schema\":\"chrono-log/v1\"}\n").unwrap();
     let staged = directory.join("runtime.pending");
-    fs::write(&staged, b"{\"schema\":\"chrono-runtime-log-gener").unwrap();
+    let partial_header = b"{\"schema\":\"chrono-runtime-log-gener";
+    fs::write(&staged, partial_header).unwrap();
 
     let held = fs::OpenOptions::new()
         .write(true)
@@ -259,11 +260,14 @@ fn idle_runtime_logs_expire_at_their_creation_deadline() {
     let report = runtime::maintain_at(&fixture.0, deadline).unwrap().unwrap();
     assert!(report.busy);
     assert!(current.exists());
-    drop(held);
+    assert!(report.errors.is_empty());
+    assert_eq!(fs::read(&staged).unwrap(), partial_header);
+    held.unlock().unwrap();
 
     let report = runtime::maintain_at(&fixture.0, deadline - 1)
         .unwrap()
         .unwrap();
+    assert!(!report.busy);
     assert!(report.errors.is_empty(), "{:?}", report.errors);
     assert_eq!(report.removed, 0);
     assert!(current.exists());
@@ -293,20 +297,28 @@ fn both_cleanup_paths_preserve_unknown_staging_bytes() {
 
     let pending = directory.join("runtime.pending");
     let member = directory.join("runtime.jsonl");
+    let lock = fs::File::options()
+        .write(true)
+        .open(directory.join("runtime.lock"))
+        .unwrap();
     let header = |deadline: u64| {
         format!("{{\"schema\":\"chrono-runtime-log-generation/v1\",\"deadline\":{deadline}}}\n")
     };
     for deadline in [1, 10, 86400, u64::MAX] {
         let valid = header(deadline);
         for cut in 0..=valid.len() {
+            // Stage under the writer's lock and hand the idle family to maintenance.
+            lock.lock().unwrap();
             fs::write(&pending, &valid.as_bytes()[..cut]).unwrap();
+            lock.unlock().unwrap();
             let report = runtime::maintain_at(&fixture.0, 1).unwrap().unwrap();
+            let exists = pending.try_exists().unwrap();
             assert!(
-                report.errors.is_empty(),
-                "deadline={deadline}, cut={cut}: {:?}",
+                !report.busy && report.errors.is_empty() && !exists,
+                "deadline={deadline}, cut={cut}, busy={}, errors={:?}, pending={exists}",
+                report.busy,
                 report.errors
             );
-            assert!(!pending.exists());
         }
     }
     let prefix = r#"{"schema":"chrono-runtime-log-generation/v1""#;
@@ -317,9 +329,12 @@ fn both_cleanup_paths_preserve_unknown_staging_bytes() {
         header(0),
         format!("{}unrelated data\n", header(1)),
     ] {
+        lock.lock().unwrap();
         fs::write(&pending, &bad).unwrap();
         fs::write(&member, header(1)).unwrap();
+        lock.unlock().unwrap();
         let report = runtime::maintain_at(&fixture.0, 1).unwrap().unwrap();
+        assert!(!report.busy, "pending={bad:?}");
         assert_eq!(report.removed, 1);
         assert_eq!(report.errors.len(), 1);
         assert!(report.errors[0].contains("runtime.pending"));
