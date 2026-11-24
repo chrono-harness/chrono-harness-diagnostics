@@ -212,6 +212,18 @@ impl Visit for Fields {
     fn record_str(&mut self, field: &Field, value: &str) {
         self.0.insert(field.name().into(), value.into());
     }
+    fn record_i128(&mut self, field: &Field, value: i128) {
+        let value = serde_json::Number::from_i128(value)
+            .map(Value::Number)
+            .unwrap_or_else(|| Value::String(value.to_string()));
+        self.0.insert(field.name().into(), value);
+    }
+    fn record_u128(&mut self, field: &Field, value: u128) {
+        let value = serde_json::Number::from_u128(value)
+            .map(Value::Number)
+            .unwrap_or_else(|| Value::String(value.to_string()));
+        self.0.insert(field.name().into(), value);
+    }
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         self.0
             .insert(field.name().into(), format!("{value:?}").into());
