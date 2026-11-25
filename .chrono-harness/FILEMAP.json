@@ -782,6 +782,7 @@
         "verify.diagnostics-error-tests",
         "verify.diagnostics-rolling-tests",
         "verify.diagnostics-runtime-tests",
+        "verify.host-adapters",
         "diagnostics.owner-check"
       ],
       "timeout_seconds": 600,
