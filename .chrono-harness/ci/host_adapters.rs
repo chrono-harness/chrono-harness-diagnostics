@@ -200,7 +200,9 @@ mod native {
         let Ok(doc) = source.parse::<toml::Table>() else {
             return false;
         };
-        let instruction_tool = doc.get("tools").and_then(toml::Value::as_table)
+        let instruction_tool = doc
+            .get("tools")
+            .and_then(toml::Value::as_table)
             .is_some_and(|tools| tools.contains_key("http:chrono-instructions"));
         let Some(setup) = doc
             .get("tasks")
@@ -236,7 +238,10 @@ mod native {
         use std::collections::BTreeSet;
 
         let manifest = mise_manifest().parse::<toml::Table>().unwrap();
-        let expected: BTreeSet<_> = manifest["tools"].as_table().unwrap().keys()
+        let expected: BTreeSet<_> = manifest["tools"]
+            .as_table()
+            .unwrap()
+            .keys()
             .filter_map(|name| name.strip_prefix("http:chrono-"))
             .collect();
         let (_, rows) = tool_installer().split_once("done <<'TOOLS'\n").unwrap();
@@ -244,7 +249,10 @@ mod native {
         let mut selected = BTreeSet::new();
         for row in rows.lines() {
             let (command, _) = row.split_once(' ').unwrap();
-            assert!(selected.insert(command.strip_prefix("chrono-").unwrap()), "{command}");
+            assert!(
+                selected.insert(command.strip_prefix("chrono-").unwrap()),
+                "{command}"
+            );
         }
         assert_eq!(selected, expected);
     }
@@ -255,7 +263,10 @@ mod native {
         let selected = true;
         assert!(setup_matches(original, selected));
         assert!(!setup_matches(
-            &original.replace("sh .chrono-harness/install-tools.sh", "sh .chrono-harness/install-tools.sh --dry-run"),
+            &original.replace(
+                "sh .chrono-harness/install-tools.sh",
+                "sh .chrono-harness/install-tools.sh --dry-run"
+            ),
             selected
         ));
         assert!(!setup_matches(
@@ -265,7 +276,8 @@ mod native {
             ),
             selected
         ));
-        let install_only = "[tools]\n[tasks.harness-setup]\nrun = 'sh .chrono-harness/install-tools.sh'";
+        let install_only =
+            "[tools]\n[tasks.harness-setup]\nrun = 'sh .chrono-harness/install-tools.sh'";
         assert!(setup_matches(install_only, false));
         assert!(!setup_matches(install_only, true));
         let reverse = "[tools.'http:chrono-instructions']\n[tasks.harness-setup]\nrun=['mise exec -- chrono-instructions sync-rules --host-root .','sh .chrono-harness/install-tools.sh']";
