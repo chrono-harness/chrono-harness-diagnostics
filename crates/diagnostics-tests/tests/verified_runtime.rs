@@ -450,3 +450,138 @@ fn closed_sink_keeps_the_first_io_failure_and_the_late_record() {
     let late: LogRecord = serde_json::from_slice(attempted_record).unwrap();
     assert_eq!(late.event, "after.finish");
 }
+
+#[cfg(not(verus_keep_ghost))]
+use chrono_diagnostics::trace_events;
+#[cfg(verus_keep_ghost)]
+use policy::trace_events;
+
+verus! {
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn terminal_status_and_error_order_follow_the_delivered_reply() {
+    let mut later = Vec::new();
+    later.push(7u8);
+    later.push(9u8);
+    let both = trace_events::ordered_errors(Some(41u8), later);
+    expect(both.len() == 3 && both[0] == 41 && both[1] == 7 && both[2] == 9);
+    let empty = trace_events::ordered_errors(None::<u8>, Vec::new());
+    expect(empty.len() == 0);
+    expect(matches!(trace_events::delivery_status(&empty, Ok::<(), u8>(())), Ok(0)));
+    expect(matches!(trace_events::delivery_status(&both, Ok::<(), u8>(())), Ok(2)));
+    expect(matches!(trace_events::delivery_status(&empty, Err(93u8)), Err(93)));
+    expect(matches!(trace_events::delivery_status(&both, Err(94u8)), Err(94)));
+}
+}
+
+#[cfg(not(verus_keep_ghost))]
+use std::io::{self, Write};
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn terminal_reply_keeps_the_rejected_event_before_the_original_flush_failure() {
+    use serde_json::{Value, json};
+    use std::io::{Read, Seek};
+    let path = std::env::temp_dir().join(format!("chrono-trace-finish-{}", std::process::id()));
+    let mut output = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .read(true)
+        .open(&path)
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+    let requests = [
+        json!({"event":{"span_entered":{"id":91}}}),
+        json!({"error":{"native_code":28,"kind":"StorageFull","custom_source":false,"message":"sink full"}}),
+    ];
+    let input = format!("{}\n{}\n", requests[0], requests[1]);
+    let code = trace_events::serve(
+        None,
+        "rejected",
+        io::Cursor::new(input),
+        output.try_clone().unwrap(),
+    )
+    .unwrap();
+    output.rewind().unwrap();
+    let mut bytes = String::new();
+    output.read_to_string(&mut bytes).unwrap();
+    let replies: Vec<Value> = bytes
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(code, 2);
+    assert_eq!(replies.len(), 3);
+    assert_eq!(&replies[..2], &[json!("ready"), json!("flush")]);
+    let errors = replies[2]["finished"].as_array().unwrap();
+    assert_eq!(errors.len(), 2);
+    assert_eq!(errors[0]["error"]["code"], "E_LOG_PROTOCOL");
+    assert_eq!(
+        errors[0]["error"]["source"]["source"]["source"]["context"]["span_id"],
+        91
+    );
+    assert_eq!(errors[1]["error"]["code"], "E_LOG_IO");
+    assert_eq!(errors[1]["error"]["source"]["native_code"], 28);
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn trace_reply_to_a_read_only_descriptor_keeps_the_os_error() {
+    let fd = std::fs::File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
+    let failure = chrono_diagnostics::trace_events::serve_to_fd(
+        None,
+        "readonly",
+        io::Cursor::new(b"\"finish\"\n\"ok\"\n"),
+        fd,
+    )
+    .unwrap_err();
+    assert_eq!(failure.raw_os_error(), Some(9));
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn an_undelivered_terminal_reply_returns_the_original_write_or_flush_error() {
+    struct TerminalFailure {
+        acknowledged: usize,
+        fail_flush: bool,
+    }
+    impl Write for TerminalFailure {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.acknowledged == 2 && !self.fail_flush {
+                return Err(io::Error::from_raw_os_error(32));
+            }
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            if self.acknowledged == 2 && self.fail_flush {
+                return Err(io::Error::from_raw_os_error(28));
+            }
+            self.acknowledged += 1;
+            Ok(())
+        }
+    }
+    for fail_flush in [false, true] {
+        let failure = chrono_diagnostics::trace_events::serve(
+            None,
+            "terminal",
+            io::Cursor::new(b"\"finish\"\n\"ok\"\n"),
+            TerminalFailure {
+                acknowledged: 0,
+                fail_flush,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            failure.raw_os_error(),
+            Some(if fail_flush { 28 } else { 32 })
+        );
+    }
+}
+
+#[cfg(verus_keep_ghost)]
+verus! {
+fn trace_exit_keeps_the_original_status_or_reports_failure(code: u8, reason: u64) {
+    let completed = policy::cli::trace_exit(Ok::<u8, u64>(code));
+    let failed = policy::cli::trace_exit(Err::<u8, u64>(reason));
+    assert(completed == code && failed == 2);
+}
+}

@@ -12,6 +12,14 @@ mod owner;
 #[path = "logging.rs"]
 pub(crate) mod logging;
 
+#[cfg(verus_keep_ghost)]
+#[path = "main.rs"]
+pub mod cli;
+
+#[cfg(verus_keep_ghost)]
+#[path = "trace_events.rs"]
+pub mod trace_events;
+
 verus! {
 
 pub open spec fn sequence_result<S, E, W, F>(
