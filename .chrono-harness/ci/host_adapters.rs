@@ -68,6 +68,8 @@ pub fn mise_manifest() -> (s: &'static str) {
     include_str!("../../.config/mise/conf.d/chrono-harness.toml")
 }
 
+pub fn tool_installer() -> (s: &'static str) { include_str!("../install-tools.sh") }
+
 pub fn installer() -> (s: &'static str) { include_str!("install.sh") }
 pub fn workflow() -> (s: &'static str) { include_str!("../../.github/workflows/release.yml") }
 }
@@ -227,6 +229,24 @@ mod native {
             _ => return false,
         };
         setup_sequence(&commands, instructions)
+    }
+
+    #[test]
+    fn every_installed_organization_tool_can_follow_the_selected_channel() {
+        use std::collections::BTreeSet;
+
+        let manifest = mise_manifest().parse::<toml::Table>().unwrap();
+        let expected: BTreeSet<_> = manifest["tools"].as_table().unwrap().keys()
+            .filter_map(|name| name.strip_prefix("http:chrono-"))
+            .collect();
+        let (_, rows) = tool_installer().split_once("done <<'TOOLS'\n").unwrap();
+        let (rows, _) = rows.split_once("\nTOOLS\n").unwrap();
+        let mut selected = BTreeSet::new();
+        for row in rows.lines() {
+            let (command, _) = row.split_once(' ').unwrap();
+            assert!(selected.insert(command.strip_prefix("chrono-").unwrap()), "{command}");
+        }
+        assert_eq!(selected, expected);
     }
 
     #[test]
