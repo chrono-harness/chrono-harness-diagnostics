@@ -6,6 +6,36 @@ use vstd::prelude::*;
 
 verus! {
 
+pub(crate) enum Publication<T> {
+    Write,
+    Blocked(T),
+    Closed,
+}
+
+/// Once finished, later events are closed even if an earlier write also failed.
+pub(crate) fn publication<T>(finished: bool, stopped: Option<T>) -> (out: Publication<T>)
+    ensures match out {
+        Publication::Write => !finished && stopped.is_none(),
+        Publication::Blocked(cause) => !finished && stopped == Some(cause),
+        Publication::Closed => finished,
+    },
+{
+    if finished { return Publication::Closed; }
+    match stopped {
+        Some(cause) => Publication::Blocked(cause),
+        None => Publication::Write,
+    }
+}
+
+/// Finalize under the existing sink lock. Only the first healthy finish flushes.
+pub(crate) fn begin_finish(finished: &mut bool, stopped: bool) -> (flush: bool)
+    ensures *finished, flush == (!*old(finished) && !stopped),
+{
+    let flush = !*finished && !stopped;
+    *finished = true;
+    flush
+}
+
 pub(crate) enum ReservedFailure<V, E> {
     Field(&'static str, V),
     Decode(E),
@@ -349,16 +379,19 @@ impl<W: Write> LogLayer<W> {
                 observed_fields: record.fields,
             })?;
             bytes.push(b'\n');
-            if sink.finished {
-                return Err(LogFailure::Closed {
-                    attempted_record: bytes,
-                });
-            }
-            if let Some(source) = &sink.stopped {
-                return Err(LogFailure::Blocked {
-                    source: source.clone(),
-                    attempted_record: bytes,
-                });
+            match publication(sink.finished, sink.stopped.as_ref()) {
+                Publication::Closed => {
+                    return Err(LogFailure::Closed {
+                        attempted_record: bytes,
+                    });
+                }
+                Publication::Blocked(source) => {
+                    return Err(LogFailure::Blocked {
+                        source: source.clone(),
+                        attempted_record: bytes,
+                    });
+                }
+                Publication::Write => {}
             }
             let result = match sink.writer.write_all(&bytes) {
                 Err(source) => Err((LogIoPhase::Write, source)),
@@ -509,18 +542,16 @@ impl<W: Write + Send + 'static> Logger<W> {
     /// Retain every original failure; repeated inspection cannot erase one.
     pub fn finish(&self) -> Result<(), Vec<Arc<LogFailure>>> {
         let mut sink = self.sink.lock().expect("diagnostic sink mutex");
-        if !sink.finished {
-            sink.finished = true;
-            if sink.stopped.is_none() {
-                if let Err(source) = sink.writer.flush() {
-                    let failure = Arc::new(LogFailure::Io {
-                        source,
-                        phase: LogIoPhase::Flush,
-                        attempted_record: None,
-                    });
-                    sink.stopped = Some(failure.clone());
-                    sink.failures.push(failure);
-                }
+        let stopped = sink.stopped.is_some();
+        if begin_finish(&mut sink.finished, stopped) {
+            if let Err(source) = sink.writer.flush() {
+                let failure = Arc::new(LogFailure::Io {
+                    source,
+                    phase: LogIoPhase::Flush,
+                    attempted_record: None,
+                });
+                sink.stopped = Some(failure.clone());
+                sink.failures.push(failure);
             }
         }
         if sink.failures.is_empty() {
