@@ -201,18 +201,6 @@
       "edges": []
     },
     {
-      "path": ".chrono-harness/setup-check-retention.sh",
-      "owner": "host",
-      "surface": "product",
-      "cost": "unmeasured",
-      "edges": [
-        {
-          "kind": "test-execution",
-          "to": "test:diagnostics-tests"
-        }
-      ]
-    },
-    {
       "path": ".chrono-harness/template-answers.yml",
       "owner": "host",
       "surface": "product",

@@ -178,12 +178,6 @@ run = "chrono-harness retention --host-root . --request .chrono-harness/maintain
 [tasks.harness-setup]
 description = "Install this repository's selected tools"
 
-run = [
-    "mise install",
-
-    "mise exec -- chrono-instructions sync-rules --host-root .",
-
-    "sh .chrono-harness/setup-check-retention.sh",
-]
+run = ["mise install", "mise exec -- chrono-instructions sync-rules --host-root ."]
 
 
