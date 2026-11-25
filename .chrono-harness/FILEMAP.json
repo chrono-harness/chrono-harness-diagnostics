@@ -127,6 +127,27 @@
       }
     },
     {
+      "path": ".chrono-harness/install-tools.sh",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": ".chrono-harness/ci/host_adapters.rs",
+            "operation": "verify.host-adapters"
+          }
+        ]
+      }
+    },
+    {
       "path": ".chrono-harness/judges.json",
       "owner": "host",
       "surface": "product",
@@ -242,6 +263,17 @@
           "to": "test:diagnostics-tests"
         }
       ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".config/mise/conf.d/.gitignore",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [],
       "verification": {
         "role": "data",
         "roots": []
