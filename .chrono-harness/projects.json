@@ -26,10 +26,10 @@
             "2",
             "--output-json",
             "--compile",
-            "--emit=link=.chrono-harness/state/verify.diagnostics-error.rlib,dep-info=.chrono-harness/state/verify.diagnostics-error.rlib.d",
+            "--emit=link={operation_state}/verify.diagnostics-error.rlib,dep-info={operation_state}/verify.diagnostics-error.rlib.d",
             "crates/diagnostics/src/verified_error.rs",
             "-o",
-            ".chrono-harness/state/verify.diagnostics-error.rlib",
+            "{operation_state}/verify.diagnostics-error.rlib",
             "-Zchecksum-hash-algorithm=sha256"
           ],
           "output_contract": {
@@ -48,10 +48,10 @@
             "2",
             "--output-json",
             "--compile",
-            "--emit=link=.chrono-harness/state/verify.diagnostics-rolling.rlib,dep-info=.chrono-harness/state/verify.diagnostics-rolling.rlib.d",
+            "--emit=link={operation_state}/verify.diagnostics-rolling.rlib,dep-info={operation_state}/verify.diagnostics-rolling.rlib.d",
             "crates/diagnostics/src/verified_rolling.rs",
             "-o",
-            ".chrono-harness/state/verify.diagnostics-rolling.rlib",
+            "{operation_state}/verify.diagnostics-rolling.rlib",
             "-Zchecksum-hash-algorithm=sha256"
           ],
           "output_contract": {
@@ -70,10 +70,10 @@
             "2",
             "--output-json",
             "--compile",
-            "--emit=link=.chrono-harness/state/verify.diagnostics-runtime.rlib,dep-info=.chrono-harness/state/verify.diagnostics-runtime.rlib.d",
+            "--emit=link={operation_state}/verify.diagnostics-runtime.rlib,dep-info={operation_state}/verify.diagnostics-runtime.rlib.d",
             "crates/diagnostics/src/verified_runtime.rs",
             "-o",
-            ".chrono-harness/state/verify.diagnostics-runtime.rlib",
+            "{operation_state}/verify.diagnostics-runtime.rlib",
             "-Zchecksum-hash-algorithm=sha256"
           ],
           "output_contract": {
@@ -103,10 +103,10 @@
             "2",
             "--output-json",
             "--compile",
-            "--emit=link=.chrono-harness/state/verify.diagnostics-error-tests.rlib,dep-info=.chrono-harness/state/verify.diagnostics-error-tests.rlib.d",
+            "--emit=link={operation_state}/verify.diagnostics-error-tests.rlib,dep-info={operation_state}/verify.diagnostics-error-tests.rlib.d",
             "crates/diagnostics-tests/tests/verified_error.rs",
             "-o",
-            ".chrono-harness/state/verify.diagnostics-error-tests.rlib",
+            "{operation_state}/verify.diagnostics-error-tests.rlib",
             "-Zchecksum-hash-algorithm=sha256"
           ],
           "output_contract": {
@@ -125,10 +125,10 @@
             "2",
             "--output-json",
             "--compile",
-            "--emit=link=.chrono-harness/state/verify.diagnostics-rolling-tests.rlib,dep-info=.chrono-harness/state/verify.diagnostics-rolling-tests.rlib.d",
+            "--emit=link={operation_state}/verify.diagnostics-rolling-tests.rlib,dep-info={operation_state}/verify.diagnostics-rolling-tests.rlib.d",
             "crates/diagnostics-tests/tests/verified_rolling.rs",
             "-o",
-            ".chrono-harness/state/verify.diagnostics-rolling-tests.rlib",
+            "{operation_state}/verify.diagnostics-rolling-tests.rlib",
             "-Zchecksum-hash-algorithm=sha256"
           ],
           "output_contract": {
@@ -147,10 +147,10 @@
             "2",
             "--output-json",
             "--compile",
-            "--emit=link=.chrono-harness/state/verify.diagnostics-runtime-tests.rlib,dep-info=.chrono-harness/state/verify.diagnostics-runtime-tests.rlib.d",
+            "--emit=link={operation_state}/verify.diagnostics-runtime-tests.rlib,dep-info={operation_state}/verify.diagnostics-runtime-tests.rlib.d",
             "crates/diagnostics-tests/tests/verified_runtime.rs",
             "-o",
-            ".chrono-harness/state/verify.diagnostics-runtime-tests.rlib",
+            "{operation_state}/verify.diagnostics-runtime-tests.rlib",
             "-Zchecksum-hash-algorithm=sha256"
           ],
           "output_contract": {
@@ -177,10 +177,10 @@
             "2",
             "--output-json",
             "--compile",
-            "--emit=link=.chrono-harness/state/verify.host-adapters.rlib,dep-info=.chrono-harness/state/verify.host-adapters.rlib.d",
+            "--emit=link={operation_state}/verify.host-adapters.rlib,dep-info={operation_state}/verify.host-adapters.rlib.d",
             ".chrono-harness/ci/host_adapters.rs",
             "-o",
-            ".chrono-harness/state/verify.host-adapters.rlib",
+            "{operation_state}/verify.host-adapters.rlib",
             "-Zchecksum-hash-algorithm=sha256"
           ],
           "output_contract": {
