@@ -38,6 +38,7 @@ bench = false
 
 [dev-dependencies]
 serde_yaml = "0.9"
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 tree-sitter = "0.25"
 tree-sitter-bash = "0.25"
 
