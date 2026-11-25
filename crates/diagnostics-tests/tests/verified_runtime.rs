@@ -295,6 +295,28 @@ fn write_then_flush_appends_to_the_actual_previous_state() {
 verus! {
 use policy::logging::{resolve_reserved, ReservedFailure};
 
+fn sink_permissions_keep_closed_priority_and_only_flush_once(cause: u64) {
+    use policy::logging::{publication, begin_finish, Publication};
+    let open = publication(false, None::<&u64>);
+    assert(matches!(open, Publication::Write));
+    match publication(false, Some(&cause)) {
+        Publication::Blocked(original) => { assert(*original == cause); }
+        _ => { assert(false); }
+    }
+    let closed_failure = publication(true, Some(&cause));
+    assert(matches!(closed_failure, Publication::Closed));
+    let closed = publication(true, None::<&u64>);
+    assert(matches!(closed, Publication::Closed));
+    let mut healthy = false;
+    let flush = begin_finish(&mut healthy, false);
+    assert(healthy && flush);
+    let again = begin_finish(&mut healthy, false);
+    assert(healthy && !again);
+    let mut stopped = false;
+    let skip = begin_finish(&mut stopped, true);
+    assert(stopped && !skip);
+}
+
 // Independent expectations cover arbitrary payloads, including the error selected
 // before a later invalid value and propagation of the decoder's own result.
 fn reserved_field_expectations(id: String, msg: String, raw: String, bad: u64) {
@@ -406,4 +428,25 @@ fn reserved_fields_reach_the_writer_or_report_the_first_original_failure() {
         assert!(!rows[1].fields.contains_key(name));
     }
     assert_eq!((&*rows[2].event, &*rows[2].message), ("", ""));
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn closed_sink_keeps_the_first_io_failure_and_the_late_record() {
+    use chrono_diagnostics::logging::{LogFailure, LogRecord, Logger};
+    use std::{io::Cursor, sync::Arc};
+
+    let logger = Logger::new("closed", tracing::Level::INFO, Cursor::new([0u8; 0]));
+    logger.run(|| tracing::info!(event_id = "first", message = "zero-capacity sink"));
+    let failed = logger.finish().unwrap_err();
+    assert!(matches!(&*failed[0], LogFailure::Io { .. }));
+    logger.run(|| tracing::info!(event_id = "after.finish", message = "retain closed record"));
+    let final_errors = logger.finish().unwrap_err();
+    assert_eq!(final_errors.len(), 2);
+    assert!(Arc::ptr_eq(&failed[0], &final_errors[0]));
+    let LogFailure::Closed { attempted_record } = &*final_errors[1] else {
+        panic!("expected a closed publication after finish");
+    };
+    let late: LogRecord = serde_json::from_slice(attempted_record).unwrap();
+    assert_eq!(late.event, "after.finish");
 }
