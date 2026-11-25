@@ -26,6 +26,94 @@ pub fn generation_expired(deadline: u64, observed: u64) -> (expired: bool)
     observed >= deadline
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ExpirationIdentity { Same, Changed, Replaced }
+
+/// The standard library observes each timestamp. An error on the current path
+/// precedes reading the open file; either error reaches the caller unchanged.
+pub fn matching_modified<T, E, O, Q>(current: Result<T, E>, opened: O, equal: Q)
+    -> (out: Result<bool, E>)
+    where O: FnOnce() -> Result<T, E>, Q: FnOnce(T, T) -> bool,
+    requires opened.requires(()), forall|a: T, b: T| equal.requires((a, b)),
+    ensures match current {
+        Err(e) => out == Err::<bool, E>(e),
+        Ok(a) => match out {
+            Err(e) => opened.ensures((), Err::<T, E>(e)),
+            Ok(same) => exists|b: T| opened.ensures((), Ok::<T, E>(b))
+                && equal.ensures((a, b), same),
+        },
+    },
+{
+    match current {
+        Err(e) => Err(e),
+        Ok(a) => match opened() { Err(e) => Err(e), Ok(b) => Ok(equal(a, b)) },
+    }
+}
+
+pub fn matching_birth<T, Q>(current: Option<T>, opened: Option<T>, equal: Q) -> (same: bool)
+    where Q: FnOnce(T, T) -> bool,
+    requires forall|a: T, b: T| equal.requires((a, b)),
+    ensures match (current, opened) {
+        (Some(a), Some(b)) => equal.ensures((a, b), same),
+        (None, None) => same,
+        _ => !same,
+    },
+{
+    match (current, opened) {
+        (Some(a), Some(b)) => equal(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+pub fn matching_node<I>(current_dev: u64, opened_dev: u64, inodes: I) -> (same: bool)
+    where I: FnOnce() -> (u64, u64),
+    requires inodes.requires(()),
+    ensures if current_dev != opened_dev { !same } else {
+        exists|pair: (u64, u64)| #[trigger] inodes.ensures((), pair) && same == (pair.0 == pair.1)
+    },
+{
+    if current_dev != opened_dev { return false; }
+    let pair = inodes();
+    pair.0 == pair.1
+}
+
+/// Observations are lazy: a comparison after the first mismatch or error is
+/// never needed. File type, lengths and timestamps share the "changed" reason.
+pub fn expiration_identity<E, L, M, B, N>(
+    regular: bool, lengths: L, modified: M, birth: B, node: N,
+) -> (out: Result<ExpirationIdentity, E>)
+    where L: FnOnce() -> (u64, u64), M: FnOnce() -> Result<bool, E>,
+          B: FnOnce() -> bool, N: FnOnce() -> bool,
+    requires lengths.requires(()), modified.requires(()), birth.requires(()), node.requires(()),
+    ensures if !regular { out == Ok::<_, E>(ExpirationIdentity::Changed) } else {
+        exists|pair: (u64, u64)| #[trigger] lengths.ensures((), pair)
+            && if pair.0 != pair.1 { out == Ok::<_, E>(ExpirationIdentity::Changed) }
+               else { match out {
+                   Err(e) => modified.ensures((), Err::<bool, E>(e)),
+                   Ok(ExpirationIdentity::Changed) => modified.ensures((), Ok::<bool, E>(false))
+                       || (modified.ensures((), Ok::<bool, E>(true)) && birth.ensures((), false)),
+                   Ok(ExpirationIdentity::Replaced) => modified.ensures((), Ok::<bool, E>(true))
+                       && birth.ensures((), true) && node.ensures((), false),
+                   Ok(ExpirationIdentity::Same) => modified.ensures((), Ok::<bool, E>(true))
+                       && birth.ensures((), true) && node.ensures((), true),
+               } }
+    },
+{
+    if !regular { return Ok(ExpirationIdentity::Changed); }
+    let pair = lengths();
+    if pair.0 != pair.1 { return Ok(ExpirationIdentity::Changed); }
+    match modified() {
+        Err(e) => Err(e),
+        Ok(false) => Ok(ExpirationIdentity::Changed),
+        Ok(true) => {
+            if !birth() { Ok(ExpirationIdentity::Changed) }
+            else if !node() { Ok(ExpirationIdentity::Replaced) }
+            else { Ok(ExpirationIdentity::Same) }
+        },
+    }
+}
+
 /// Before the first deadline digit, every writer header has the same prefix.
 pub fn staged_deadline(decoded: Option<u64>) -> (deadline: u64)
     ensures deadline > 0,
@@ -407,17 +495,31 @@ impl RollingFile {
             // All adopted writers and maintenance hold the family lock. Recheck
             // the opened generation before removing its directory entry.
             let current = fs::symlink_metadata(path)?;
-            if !current.is_file()
-                || current.len() != metadata.len()
-                || current.modified()? != metadata.modified()?
-                || current.created().ok() != metadata.created().ok()
-            {
-                return Err(invalid("log member changed during expiration"));
-            }
             #[cfg(unix)]
-            {
+            let same_node = || {
                 use std::os::unix::fs::MetadataExt;
-                if current.dev() != metadata.dev() || current.ino() != metadata.ino() {
+                matching_node(current.dev(), metadata.dev(), || {
+                    (current.ino(), metadata.ino())
+                })
+            };
+            #[cfg(not(unix))]
+            let same_node = || true;
+            match expiration_identity(
+                current.is_file(),
+                || (current.len(), metadata.len()),
+                || matching_modified(current.modified(), || metadata.modified(), |a, b| a == b),
+                || {
+                    matching_birth(current.created().ok(), metadata.created().ok(), |a, b| {
+                        a == b
+                    })
+                },
+                same_node,
+            )? {
+                ExpirationIdentity::Same => (),
+                ExpirationIdentity::Changed => {
+                    return Err(invalid("log member changed during expiration"));
+                }
+                ExpirationIdentity::Replaced => {
                     return Err(invalid("log member was replaced during expiration"));
                 }
             }

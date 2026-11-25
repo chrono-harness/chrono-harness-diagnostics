@@ -27,6 +27,62 @@ fn a_log_generation_expires_at_its_original_deadline() {
     expect_generation(owner::generation_deadline(u64::MAX - 1, 1) == Some(u64::MAX));
 }
 
+/// Require the same result for every completed observation, including an
+/// original timestamp error that lower-priority mismatches must not hide.
+fn recheck_case(regular: bool, current: u64, opened: u64, modified: Result<bool, u8>,
+                birth: bool, node: bool) -> (out: Result<owner::ExpirationIdentity, u8>)
+    ensures out == if !regular || current != opened {
+        Ok::<_, u8>(owner::ExpirationIdentity::Changed)
+    } else {
+        match modified {
+            Err(e) => Err(e),
+            Ok(false) => Ok(owner::ExpirationIdentity::Changed),
+            Ok(true) if !birth => Ok(owner::ExpirationIdentity::Changed),
+            Ok(true) if !node => Ok(owner::ExpirationIdentity::Replaced),
+            Ok(true) => Ok(owner::ExpirationIdentity::Same),
+        }
+    },
+{
+    let lengths = || -> (pair: (u64, u64)) ensures pair == (current, opened), { (current, opened) };
+    let time = || -> (result: Result<bool, u8>) ensures result == modified, { modified };
+    let creation = || -> (result: bool) ensures result == birth, { birth };
+    let identity = || -> (result: bool) ensures result == node, { node };
+    owner::expiration_identity(regular, lengths, time, creation, identity)
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn removal_requires_each_observation_and_preserves_the_first_error() {
+    use owner::ExpirationIdentity::{Changed, Replaced, Same};
+    expect_generation(matches!(recheck_case(false, 1, 1, Err(9), false, false), Ok(Changed)));
+    expect_generation(matches!(recheck_case(true, 0, u64::MAX, Err(9), true, true), Ok(Changed)));
+    expect_generation(matches!(recheck_case(true, 1, 1, Err(9), false, false), Err(9)));
+    expect_generation(matches!(recheck_case(true, 1, 1, Ok(false), true, false), Ok(Changed)));
+    expect_generation(matches!(recheck_case(true, 1, 1, Ok(true), false, false), Ok(Changed)));
+    expect_generation(matches!(recheck_case(true, 1, 1, Ok(true), true, false), Ok(Replaced)));
+    expect_generation(matches!(recheck_case(true, u64::MAX, u64::MAX, Ok(true), true, true), Ok(Same)));
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn timestamp_errors_optional_birth_and_unix_identity_use_their_observed_values() {
+    let equal = |a: u64, b: u64| -> (same: bool) ensures same == (a == b), { a == b };
+    let unreadable = || -> (out: Result<u64, u8>) ensures out == Err::<u64, u8>(7), { Err(7) };
+    let read = || -> (out: Result<u64, u8>) ensures out == Ok::<u64, u8>(4), { Ok(4) };
+    expect_generation(matches!(owner::matching_modified(Err(3), unreadable, equal), Err(3)));
+    expect_generation(matches!(owner::matching_modified(Ok(4), unreadable, equal), Err(7)));
+    expect_generation(matches!(owner::matching_modified(Ok(4), read, equal), Ok(true)));
+    expect_generation(matches!(owner::matching_modified(Ok(5), read, equal), Ok(false)));
+    expect_generation(owner::matching_birth(None, None, equal));
+    expect_generation(!owner::matching_birth(None, Some(4), equal));
+    expect_generation(!owner::matching_birth(Some(4), None, equal));
+    expect_generation(owner::matching_birth(Some(4), Some(4), equal));
+    expect_generation(!owner::matching_birth(Some(4), Some(5), equal));
+    let same = || -> (out: (u64,u64)) ensures out == (8u64,8u64), { (8,8) };
+    let other = || -> (out: (u64,u64)) ensures out == (8u64,9u64), { (8,9) };
+    expect_generation(owner::matching_node(1, 1, same));
+    expect_generation(!owner::matching_node(1, 2, same));
+    expect_generation(!owner::matching_node(1, 1, other));
+}
+
 #[cfg_attr(not(verus_keep_ghost), test)]
 fn only_writer_prefixes_can_be_removed() {
     expect_generation(owner::staged_deadline(None) == 1);
@@ -40,6 +96,60 @@ fn only_writer_prefixes_can_be_removed() {
     expect_generation(!owner::staged_header_matches(&[123u8, 125u8, 10u8, 0u8], &header));
 }
 
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn expiration_stops_reading_after_the_first_mismatch_or_error() {
+    use std::cell::RefCell;
+    // A later metadata read can fail. Its outcome must not replace an earlier
+    // mismatch or an error from the current path.
+    let stages = [
+        "length",
+        "current mtime",
+        "open mtime",
+        "birth",
+        "device",
+        "inode",
+    ];
+    for stop in 0..=stages.len() {
+        let reads = RefCell::new(Vec::new());
+        let record = |name| reads.borrow_mut().push(name);
+        let _result = owner::expiration_identity(
+            stop > 0,
+            || {
+                record("length");
+                (0, u64::from(stop == 1))
+            },
+            || {
+                record("current mtime");
+                owner::matching_modified(
+                    if stop == 2 {
+                        Err("current error")
+                    } else {
+                        Ok(0)
+                    },
+                    || {
+                        record("open mtime");
+                        if stop == 3 { Err("open error") } else { Ok(0) }
+                    },
+                    |a, b| a == b,
+                )
+            },
+            || {
+                record("birth");
+                stop != 4
+            },
+            || {
+                record("device");
+                owner::matching_node(0, u64::from(stop == 5), || {
+                    record("inode");
+                    (0, 0)
+                })
+            },
+        );
+        assert_eq!(*reads.borrow(), stages[..stop]);
+    }
 }
 
 #[cfg(not(verus_keep_ghost))]
