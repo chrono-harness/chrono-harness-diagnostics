@@ -26,12 +26,6 @@ Rust 结构化错误、运行日志和按创建期限滚动的文件日志。
 
 ## 开发机检查原件
 
-本仓将本地检查准备、工作树输入、单元执行和汇总诊断的原件登记给已安装的 runner。保留窗口为 24 小时。需要长期保留的结果请在窗口内复制到持久存储。当前报告和活跃读者持有引用；结果已替换、读者已释放且期限届满后，维护会回收实际文件。采用前生成的旧文件需要按原生产者和最后使用方核对。
-
-在运行过本仓检查的长期主检出，开发者可在自己的 crontab 中加入以下条目，将绝对路径替换为本仓主检出。定时器每小时调用同一个 runner 维护请求。移除该条目即可取消定时维护。
-
-```cron
-0 * * * * cd '/absolute/path/to/chrono-harness-diagnostics' && .chrono-harness/bin/chrono-harness retention --host-root . --request .chrono-harness/maintain-checks.json >/dev/null
-```
+本仓通过模板选装 `local_check_retention`。保留期限、窗口内转存和定时维护的命令见[本仓工具入口](.chrono-harness/USAGE.md#开发机检查原件)。
 
 GitHub Actions 的单元原件保留 1 天。汇总归档随 GitHub 仓库设置滚动；采用时仓库配置为 90 天。
