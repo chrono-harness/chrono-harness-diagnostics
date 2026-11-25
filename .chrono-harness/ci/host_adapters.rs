@@ -1,4 +1,4 @@
-//! These two adapters use the registered bootstrap table and release program.
+//! The host adapters cover the registered tool setup, native check handoff and release program.
 //! The shell reader checks the observed commands, platform cases and selected control dependencies.
 //! The release YAML reader supplies typed fields; Actions executes job dependencies.
 #![allow(unexpected_cfgs)]
@@ -47,6 +47,22 @@ pub fn setup_sequence(commands: &[String], instructions: bool) -> (accepted: boo
     commands[0] == "mise install".to_string() && (!instructions
         || commands[1] == "mise exec -- chrono-instructions sync-rules --host-root .".to_string())
 }
+
+/// The public native route transfers the process to the host's installed scratch owner.
+pub fn native_owner_command(argv: &[String]) -> (accepted: bool)
+    ensures accepted == (argv.len() == 7
+        && argv@[0]@ == "exec"@ && argv@[1]@ == "chrono-host-bootstrap"@
+        && argv@[2]@ == "native-scratch"@ && argv@[3]@ == "run"@
+        && argv@[4]@ == "/bin/bash"@ && argv@[5]@ == "./check.sh"@
+        && argv@[6]@ == "--native-in-directory"@),
+{
+    argv.len() == 7 && argv[0] == "exec".to_string() && argv[1] == "chrono-host-bootstrap".to_string()
+        && argv[2] == "native-scratch".to_string() && argv[3] == "run".to_string()
+        && argv[4] == "/bin/bash".to_string() && argv[5] == "./check.sh".to_string()
+        && argv[6] == "--native-in-directory".to_string()
+}
+
+pub fn check_entrypoint() -> (s: &'static str) { include_str!("../../check.sh") }
 
 pub fn mise_manifest() -> (s: &'static str) {
     include_str!("../../.config/mise/conf.d/chrono-harness.toml")
@@ -143,6 +159,39 @@ mod native {
         for child in node.children(&mut cursor) {
             observe(child, src, context, e);
         }
+    }
+
+    #[test]
+    fn public_native_check_starts_the_scratch_owner() {
+        let source = check_entrypoint();
+        let tree = shell_tree(source).unwrap();
+        let root = tree.root_node();
+        let mut cursor = root.walk();
+        let route = root
+            .named_children(&mut cursor)
+            .find(|node| {
+                node.kind() == "if_statement"
+                    && node
+                        .child_by_field_name("condition")
+                        .is_some_and(|condition| {
+                            &source[condition.byte_range()] == "[[ $# == 1 && $1 == --native ]]"
+                        })
+            })
+            .expect("the public --native branch");
+        let mut cursor = route.walk();
+        let commands: Vec<_> = route
+            .named_children(&mut cursor)
+            .filter(|node| node.kind() == "command")
+            .collect();
+        assert_eq!(commands.len(), 1);
+        let mut cursor = commands[0].walk();
+        let mut argv: Vec<_> = commands[0]
+            .named_children(&mut cursor)
+            .map(|node| source[node.byte_range()].to_owned())
+            .collect();
+        assert!(native_owner_command(&argv));
+        argv.remove(0);
+        assert!(!native_owner_command(&argv));
     }
 
     fn setup_matches(source: &str, instructions: bool) -> bool {
