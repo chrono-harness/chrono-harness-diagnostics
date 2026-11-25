@@ -1,8 +1,25 @@
+#[cfg(not(verus_keep_ghost))]
+use chrono_diagnostics::verus;
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+verus! {
+pub(crate) fn trace_exit<E>(result: Result<u8, E>) -> (code: u8)
+    ensures code == match result { Ok(status) => status, Err(_) => 2u8 },
+{
+    match result { Ok(status) => status, Err(_) => 2 }
+}
+}
+#[cfg(not(verus_keep_ghost))]
 use chrono_diagnostics::{runtime, trace_events};
+#[cfg(not(verus_keep_ghost))]
 use std::io::{self, Write};
+#[cfg(not(verus_keep_ghost))]
 use std::path::Path;
+#[cfg(not(verus_keep_ghost))]
 use std::process::ExitCode;
 
+#[cfg(not(verus_keep_ghost))]
 fn main() -> ExitCode {
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
     let mut stdout = io::stdout().lock();
@@ -41,18 +58,14 @@ fn main() -> ExitCode {
             } else {
                 Some(Path::new(root))
             };
-            return match trace_events::serve(
+            let delivered = trace_events::serve_to_fd(
                 policy,
                 producer,
                 io::BufReader::new(io::stdin()),
                 io::stdout(),
-            ) {
-                Ok(status) => ExitCode::from(status),
-                Err(error) => {
-                    eprintln!("trace-events-v1: {error}");
-                    ExitCode::from(2)
-                }
-            };
+            )
+            .inspect_err(|error| eprintln!("trace-events-v1: {error}"));
+            return ExitCode::from(trace_exit(delivered));
         }
         [command, root] if command == "expire-logs-v1" => {
             match runtime::maintain(Path::new(root)) {

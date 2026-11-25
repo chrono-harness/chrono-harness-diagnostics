@@ -1,18 +1,53 @@
 //! Replay an installed producer's tracing stream through the host's runtime logger.
 //! The explicit writer is acknowledged by its owner so its original failure reaches Logger.
+#[cfg(not(verus_keep_ghost))]
+use crate::verus;
+#[cfg(verus_keep_ghost)]
+use vstd::prelude::*;
+
+verus! {
+/// Keep a stream failure first, followed by every original finish failure in order.
+pub fn ordered_errors<T>(stream: Option<T>, mut finished: Vec<T>) -> (out: Vec<T>)
+    ensures out@ == match stream { None => finished@, Some(error) => seq![error] + finished@ },
+{
+    if let Some(error) = stream { finished.insert(0, error); }
+    finished
+}
+
+/// Only a delivered terminal reply can yield a protocol status.
+pub fn delivery_status<T, E>(errors: &[T], delivered: Result<(), E>) -> (out: Result<u8, E>)
+    ensures out == match delivered {
+        Err(error) => Err::<u8, E>(error),
+        Ok(()) => Ok::<u8, E>(if errors.len() == 0 { 0u8 } else { 2u8 }),
+    },
+{
+    match delivered {
+        Err(error) => Err(error),
+        Ok(()) => Ok(if errors.is_empty() { 0 } else { 2 }),
+    }
+}
+}
+
+#[cfg(not(verus_keep_ghost))]
 use crate::{
     error::{ErrorRecord, ErrorSchema, Failure, NativeIoError, RecordedError, WriterError},
     logging::{Level, Logger},
     runtime,
 };
+#[cfg(not(verus_keep_ghost))]
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+#[cfg(not(verus_keep_ghost))]
 use std::{
-    io::{self, BufRead, Write},
+    fs::File,
+    io::{self, BufRead, BufWriter, Write},
+    os::fd::AsFd,
     path::Path,
     sync::{Arc, Mutex},
 };
+#[cfg(not(verus_keep_ghost))]
 use tracing_tunnel::{TracingEvent, TracingEventReceiver};
 
+#[cfg(not(verus_keep_ghost))]
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Request {
@@ -20,6 +55,7 @@ enum Request {
     Finish,
 }
 
+#[cfg(not(verus_keep_ghost))]
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Reply<'a> {
@@ -30,6 +66,7 @@ enum Reply<'a> {
     Finished(&'a [ErrorRecord]),
 }
 
+#[cfg(not(verus_keep_ghost))]
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Acknowledgment {
@@ -42,11 +79,13 @@ enum Acknowledgment {
     },
 }
 
+#[cfg(not(verus_keep_ghost))]
 struct Channel<R, W> {
     input: R,
     output: W,
 }
 
+#[cfg(not(verus_keep_ghost))]
 impl<R: BufRead, W: Write> Channel<R, W> {
     fn read<T: DeserializeOwned>(&mut self) -> io::Result<T> {
         let mut line = String::new();
@@ -60,9 +99,14 @@ impl<R: BufRead, W: Write> Channel<R, W> {
     }
 
     fn send(&mut self, reply: Reply<'_>) -> io::Result<()> {
-        serde_json::to_writer(&mut self.output, &reply)?;
-        self.output.write_all(b"\n")?;
+        let mut bytes = serde_json::to_vec(&reply)?;
+        bytes.push(b'\n');
+        self.output.write_all(&bytes)?;
         self.output.flush()
+    }
+
+    fn finish(&mut self, errors: &[ErrorRecord]) -> io::Result<u8> {
+        delivery_status(errors, self.send(Reply::Finished(errors)))
     }
 
     fn publish(&mut self, reply: Reply<'_>) -> io::Result<()> {
@@ -87,8 +131,10 @@ impl<R: BufRead, W: Write> Channel<R, W> {
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 struct ExplicitSink<R, W>(Arc<Mutex<Channel<R, W>>>);
 
+#[cfg(not(verus_keep_ghost))]
 impl<R: BufRead, W: Write> Write for ExplicitSink<R, W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let record = std::str::from_utf8(bytes).map_err(io::Error::other)?;
@@ -101,10 +147,24 @@ impl<R: BufRead, W: Write> Write for ExplicitSink<R, W> {
     }
 }
 
+#[cfg(not(verus_keep_ghost))]
 pub(super) fn receiver() -> TracingEventReceiver {
     TracingEventReceiver::new(Default::default(), Default::default(), Default::default())
 }
 
+/// Use the OS writer so a lost stdout is reported even for a read-only descriptor.
+#[cfg(not(verus_keep_ghost))]
+pub fn serve_to_fd(
+    root: Option<&Path>,
+    producer: &str,
+    input: impl BufRead + Send + 'static,
+    output: impl AsFd,
+) -> io::Result<u8> {
+    let file = File::from(output.as_fd().try_clone_to_owned()?);
+    serve(root, producer, input, BufWriter::new(file))
+}
+
+#[cfg(not(verus_keep_ghost))]
 pub fn serve(
     root: Option<&Path>,
     producer: &str,
@@ -123,13 +183,7 @@ pub fn serve(
     };
     let logger = match chosen {
         Ok(logger) => logger,
-        Err(error) => {
-            channel
-                .lock()
-                .unwrap()
-                .send(Reply::Finished(&[error.record()]))?;
-            return Ok(2);
-        }
+        Err(error) => return channel.lock().unwrap().finish(&[error.record()]),
     };
     channel.lock().unwrap().send(Reply::Ready)?;
     let stream = logger.run(|| -> io::Result<()> {
@@ -145,17 +199,19 @@ pub fn serve(
             }
         }
     });
-    let mut errors: Vec<_> = stream
+    let stream_error = stream
         .err()
-        .map(|e| Failure::wrap("E_LOG_PROTOCOL", e.to_string(), NativeIoError::new(e)).record())
+        .map(|e| Failure::wrap("E_LOG_PROTOCOL", e.to_string(), NativeIoError::new(e)).record());
+    let finish_errors = logger
+        .finish()
+        .err()
         .into_iter()
-        .collect();
-    if let Err(failures) = logger.finish() {
-        errors.extend(failures.into_iter().map(|error| ErrorRecord {
+        .flatten()
+        .map(|error| ErrorRecord {
             schema: ErrorSchema::V1,
             error: error.error_node(),
-        }));
-    }
-    channel.lock().unwrap().send(Reply::Finished(&errors))?;
-    Ok(if errors.is_empty() { 0 } else { 2 })
+        })
+        .collect();
+    let errors = ordered_errors(stream_error, finish_errors);
+    channel.lock().unwrap().finish(&errors)
 }
