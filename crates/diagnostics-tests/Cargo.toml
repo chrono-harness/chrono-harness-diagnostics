@@ -35,3 +35,12 @@ name = "chrono-test-log-writer"
 path = "tests/support/log_writer.rs"
 test = false
 bench = false
+
+[dev-dependencies]
+serde_yaml = "0.9"
+tree-sitter = "0.25"
+tree-sitter-bash = "0.25"
+
+[[test]]
+name = "host_adapters"
+path = "../../.chrono-harness/ci/host_adapters.rs"

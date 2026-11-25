@@ -27,3 +27,18 @@ project_guide: ''
 repository: chrono-harness/chrono-harness-diagnostics
 required_check: check
 
+strict_host_adapters:
+  binary: chrono-diagnostics
+  ci_tools:
+  - chrono-harness
+  - chrono-worktree
+  - chrono-diagnostics
+  - chrono-ci
+  - chrono-judge-ci
+  - chrono-judge-routes
+  - chrono-judge-registration
+  - chrono-judge-projects
+  - chrono-judge-filemap
+  - chrono-host-bootstrap
+  - verus
+  verus_macro_crate: chrono_diagnostics

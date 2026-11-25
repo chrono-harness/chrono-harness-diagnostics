@@ -43,7 +43,7 @@ if [ "${GITHUB_ACTIONS:-}" = true ]; then
 fi
 set -- chrono-harness chrono-worktree chrono-diagnostics chrono-ci chrono-judge-ci chrono-judge-routes chrono-judge-registration chrono-judge-projects chrono-judge-filemap chrono-host-bootstrap verus
 mkdir -p .chrono-harness/bin
-for tool do
+for tool; do
     if ! executable=$("$manager" which "$tool" 2>/dev/null); then
         "$manager" install "http:$tool"
         executable=$("$manager" which "$tool")
