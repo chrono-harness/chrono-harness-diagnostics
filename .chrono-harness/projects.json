@@ -165,6 +165,28 @@
             "./check.sh",
             "--native"
           ]
+        },
+        "verify_host_adapters": {
+          "operation": "verify.host-adapters",
+          "tool": "verus",
+          "argv": [
+            "--crate-type=lib",
+            "--no-cheating",
+            "--no-external-by-default",
+            "--num-threads",
+            "2",
+            "--output-json",
+            "--compile",
+            "--emit=link=.chrono-harness/state/verify.host-adapters.rlib,dep-info=.chrono-harness/state/verify.host-adapters.rlib.d",
+            ".chrono-harness/ci/host_adapters.rs",
+            "-o",
+            ".chrono-harness/state/verify.host-adapters.rlib",
+            "-Zchecksum-hash-algorithm=sha256"
+          ],
+          "output_contract": {
+            "version": "0.2026.04.24.f8e1704",
+            "commit": "f8e17045c4ac17a02e566b8997070f2eecc255be"
+          }
         }
       },
       "language": "rust"

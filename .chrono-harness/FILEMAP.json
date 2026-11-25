@@ -49,6 +49,27 @@
       }
     },
     {
+      "path": ".chrono-harness/ci/host_adapters.rs",
+      "owner": "diagnostics-tests",
+      "surface": "test",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": ".chrono-harness/ci/host_adapters.rs",
+            "operation": "verify.host-adapters"
+          }
+        ]
+      }
+    },
+    {
       "path": ".chrono-harness/ci/install.sh",
       "owner": "host",
       "surface": "product",
@@ -58,7 +79,16 @@
           "kind": "test-execution",
           "to": "test:diagnostics-tests"
         }
-      ]
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": ".chrono-harness/ci/host_adapters.rs",
+            "operation": "verify.host-adapters"
+          }
+        ]
+      }
     },
     {
       "path": ".chrono-harness/ci/units.json",
@@ -175,7 +205,11 @@
       "owner": "host",
       "surface": "product",
       "cost": "unmeasured",
-      "edges": []
+      "edges": [],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
     },
     {
       "path": ".chrono-harness/workflow.json",
@@ -273,7 +307,21 @@
       "owner": "host",
       "surface": "product",
       "cost": "unmeasured",
-      "edges": []
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": ".chrono-harness/ci/host_adapters.rs",
+            "operation": "verify.host-adapters"
+          }
+        ]
+      }
     },
     {
       "path": ".gitignore",
@@ -330,7 +378,11 @@
           "kind": "test-execution",
           "to": "test:diagnostics-tests"
         }
-      ]
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
     },
     {
       "path": "crates/diagnostics-tests/Cargo.toml",
@@ -342,7 +394,11 @@
           "kind": "test-execution",
           "to": "test:diagnostics-tests"
         }
-      ]
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
     },
     {
       "path": "crates/diagnostics-tests/tests/records.rs",
@@ -726,6 +782,7 @@
         "verify.diagnostics-error-tests",
         "verify.diagnostics-rolling-tests",
         "verify.diagnostics-runtime-tests",
+        "verify.host-adapters",
         "diagnostics.owner-check"
       ],
       "timeout_seconds": 600,
