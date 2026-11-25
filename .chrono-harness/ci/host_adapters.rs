@@ -40,11 +40,11 @@ pub fn requires_success(needs_id: &String, predecessor: &String, explicit_if: bo
 /// A mise setup installs tools first and refreshes the rules only when selected.
 pub fn setup_sequence(commands: &[String], instructions: bool) -> (accepted: bool)
     ensures accepted == (commands.len() == (if instructions { 2usize } else { 1usize })
-        && commands@[0]@ == "mise install"@
+        && commands@[0]@ == "sh .chrono-harness/install-tools.sh"@
         && (!instructions || commands@[1]@ == "mise exec -- chrono-instructions sync-rules --host-root ."@)),
 {
     if commands.len() != (if instructions { 2usize } else { 1usize }) { return false; }
-    commands[0] == "mise install".to_string() && (!instructions
+    commands[0] == "sh .chrono-harness/install-tools.sh".to_string() && (!instructions
         || commands[1] == "mise exec -- chrono-instructions sync-rules --host-root .".to_string())
 }
 
@@ -67,6 +67,8 @@ pub fn check_entrypoint() -> (s: &'static str) { include_str!("../../check.sh") 
 pub fn mise_manifest() -> (s: &'static str) {
     include_str!("../../.config/mise/conf.d/chrono-harness.toml")
 }
+
+pub fn tool_installer() -> (s: &'static str) { include_str!("../install-tools.sh") }
 
 pub fn installer() -> (s: &'static str) { include_str!("install.sh") }
 pub fn workflow() -> (s: &'static str) { include_str!("../../.github/workflows/release.yml") }
@@ -198,9 +200,10 @@ mod native {
         let Ok(doc) = source.parse::<toml::Table>() else {
             return false;
         };
-        let Some(tools) = doc.get("tools").and_then(toml::Value::as_table) else {
-            return false;
-        };
+        let instruction_tool = doc
+            .get("tools")
+            .and_then(toml::Value::as_table)
+            .is_some_and(|tools| tools.contains_key("http:chrono-instructions"));
         let Some(setup) = doc
             .get("tasks")
             .and_then(|tasks| tasks.get("harness-setup"))
@@ -208,7 +211,7 @@ mod native {
         else {
             return false;
         };
-        if tools.contains_key("http:chrono-instructions") != instructions
+        if instruction_tool != instructions
             || setup.keys().any(|key| key != "run" && key != "description")
         {
             return false;
@@ -231,12 +234,39 @@ mod native {
     }
 
     #[test]
+    fn every_installed_organization_tool_can_follow_the_selected_channel() {
+        use std::collections::BTreeSet;
+
+        let manifest = mise_manifest().parse::<toml::Table>().unwrap();
+        let expected: BTreeSet<_> = manifest["tools"]
+            .as_table()
+            .unwrap()
+            .keys()
+            .filter_map(|name| name.strip_prefix("http:chrono-"))
+            .collect();
+        let (_, rows) = tool_installer().split_once("done <<'TOOLS'\n").unwrap();
+        let (rows, _) = rows.split_once("\nTOOLS\n").unwrap();
+        let mut selected = BTreeSet::new();
+        for row in rows.lines() {
+            let (command, _) = row.split_once(' ').unwrap();
+            assert!(
+                selected.insert(command.strip_prefix("chrono-").unwrap()),
+                "{command}"
+            );
+        }
+        assert_eq!(selected, expected);
+    }
+
+    #[test]
     fn mise_installs_the_selected_tools_before_refreshing_instructions() {
         let original = mise_manifest();
         let selected = true;
         assert!(setup_matches(original, selected));
         assert!(!setup_matches(
-            &original.replace("mise install", "mise install --dry-run"),
+            &original.replace(
+                "sh .chrono-harness/install-tools.sh",
+                "sh .chrono-harness/install-tools.sh --dry-run"
+            ),
             selected
         ));
         assert!(!setup_matches(
@@ -246,12 +276,13 @@ mod native {
             ),
             selected
         ));
-        let install_only = "[tools]\n[tasks.harness-setup]\nrun = 'mise install'";
+        let install_only =
+            "[tools]\n[tasks.harness-setup]\nrun = 'sh .chrono-harness/install-tools.sh'";
         assert!(setup_matches(install_only, false));
         assert!(!setup_matches(install_only, true));
-        let reverse = "[tools.'http:chrono-instructions']\n[tasks.harness-setup]\nrun=['mise exec -- chrono-instructions sync-rules --host-root .','mise install']";
+        let reverse = "[tools.'http:chrono-instructions']\n[tasks.harness-setup]\nrun=['mise exec -- chrono-instructions sync-rules --host-root .','sh .chrono-harness/install-tools.sh']";
         assert!(!setup_matches(reverse, true));
-        let extra = "[tools]\n[tasks.harness-setup]\nrun = ['mise install', 'another-command']";
+        let extra = "[tools]\n[tasks.harness-setup]\nrun = ['sh .chrono-harness/install-tools.sh', 'another-command']";
         assert!(!setup_matches(extra, false));
     }
 
