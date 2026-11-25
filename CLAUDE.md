@@ -25,6 +25,8 @@ mise run harness-setup
 
 开始和结束任务时，用 `mise exec -- chrono-pr pr-reminders` 查看本工作树中自己打开的 PR。用 `mise exec -- chrono-pr pr-status --pr NUMBER --head-sha SHA` 核对指定候选。
 
+本地检查原件的保留窗口和定时维护入口见 [.chrono-harness/USAGE.md](.chrono-harness/USAGE.md)。需要保留的报告和原件应在窗口内转存。
+
 ## 基础指令
 
 默认采用上游全部现有规则和以后新增的规则。`.chrono-harness/rules.json` 中的 `{"mode":"all"}` 表示全选。要屏蔽个别规则，在 all 模式设置 `exclude`。要只选几条，设置 `mode` 为 `only` 并填写 `include`。要关闭继承，使用 `{"mode":"off"}`。
@@ -157,6 +159,12 @@ agent 写实际运行时和任务路径，至少两段，每段符合 [a-z0-9][a
 action 取 task、delegate、issue、pr、review、push、ci.wait、check、build、test、release 之一。state 取 started、waiting、progress、blocked、succeeded、failed、cancelled 之一。target 取 self（本条正文所在的 GitHub 对象，适合编号未分配时）、task/<UUIDv4>、owner/repo#正整数、owner/repo@完整小写 Git OID（40 或 64 位）、owner/repo/run/正整数（可接 /attempt/正整数）或 owner/repo/tag/ASCII标签。开始、等待、解除阻塞、进展和结束时记录真实发生的转换，沿用同一 task、以不同 event 区分。等待完成通知时只发一次 waiting。成功/失败/取消结束该动作；新试验用新的事件陈述重试。保留乱序到达的每条观察，按 GitHub 原对象及创建时间组织，不以最后到达推断状态。相同 event 及内容只计一次，相同 event 内容冲突记为未知。
 
 用 chrono-instructions event-format 将八字段 JSON 写成 v3。event-read 从原始 GitHub 正文读取八字段 JSON，也能读取已发布的 v2。event-regex 输出 Python、PCRE2 和 JavaScript 可直接使用的三行正则，捕获组 1 到 8 依次为 event、session、parent、task、agent、action、state、target，末行反向引用第 1 组。读取器核对顶层 Markdown、唯一的末尾记录、UUID 独立性及首尾一致，接受 LF 或 CRLF 和一个可选末尾换行。引用、围栏及 HTML 示例中的内容按 Markdown 处理。缺失、无效、截断和歧义均记为未知。GitHub 提供作者账号，事件记录自报信息。复制整个记录能通过语法校验，身份和执行结果须分别核实。
+
+## collaboration.github-contribution
+
+普通 Issue 按主要诉求选择一个主标签：缺陷用 `bug`，功能或改进用 `enhancement`，文档用 `documentation`，问题用 `question`。发布失败沿用专用 `release-failure`。分支从 `dev` 创建，选 `feature/` 或 `integration/`，后接英文小写连字符短语；有本仓 Issue 时在短语前加编号和连字符。日常 PR 以 `dev` 为目标，正式版使用 `main`。PR 标题采用 `type(scope): 结果`，正文用 `Refs #编号` 关联工作，合入默认分支即可满足全部验收时用 `Closes #编号`；仍需发布、落地 CI 或下游采用时用 `Refs`，取得证据后关闭。跨仓引用写完整仓库名和编号。
+
+[组织协作规范](https://github.com/chrono-harness/chrono-harness-main/blob/dev/docs/contributing.md)
 
 ## candidate.landing
 
