@@ -544,7 +544,11 @@ mod native {
         let Some(source_map) = source.as_mapping() else {
             return false;
         };
-        if source_map.len() != 2 || source["runs-on"].as_str() != Some("ubuntu-24.04") {
+        if source_map.len() != 3
+            || source["runs-on"].as_str() != Some("ubuntu-24.04")
+            || source["outputs"]["prerelease"].as_str()
+                != Some("${{ steps.tag.outputs.prerelease }}")
+        {
             return false;
         }
         let Some(steps) = source["steps"].as_sequence() else {
@@ -561,7 +565,8 @@ mod native {
             || checkout["with"].as_mapping().map(|x| x.len()) != Some(2)
             || checkout["with"]["fetch-depth"].as_i64() != Some(0)
             || checkout["with"]["persist-credentials"].as_bool() != Some(false)
-            || decision.as_mapping().map(|x| x.len()) != Some(3)
+            || decision.as_mapping().map(|x| x.len()) != Some(4)
+            || decision["id"].as_str() != Some("tag")
             || decision["name"].as_str().is_none()
             || decision["shell"].as_str() != Some("bash")
         {
@@ -570,7 +575,38 @@ mod native {
         let Some(shell) = decision["run"].as_str() else {
             return false;
         };
-        source_command_plan(shell) && needs(build, "source") && needs(publish, "build")
+        let Some(requirements) = publish["needs"].as_sequence() else {
+            return false;
+        };
+        let Some(publisher) = publish["steps"]
+            .as_sequence()
+            .and_then(|steps| steps.last())
+        else {
+            return false;
+        };
+        source_command_plan(shell)
+            && needs(build, "source")
+            && requirements.len() == 2
+            && ["source", "build"].iter().all(|expected| {
+                requirements.iter().any(|id| {
+                    id.as_str().is_some_and(|id| {
+                        requires_success(
+                            &id.to_owned(),
+                            &expected.to_string(),
+                            publish.get("if").is_some(),
+                            publish.get("continue-on-error").is_some(),
+                        )
+                    })
+                })
+            })
+            && publisher["env"]["PRERELEASE"].as_str()
+                == Some("${{ needs.source.outputs.prerelease }}")
+            && publisher["run"].as_str().is_some_and(|shell| {
+                shell
+                    .split_ascii_whitespace()
+                    .filter(|arg| arg.starts_with("--prerelease"))
+                    .eq([r#"--prerelease="$PRERELEASE""#])
+            })
     }
 
     // Read each top-level command from the real source step. Formatting and
@@ -619,7 +655,7 @@ mod native {
                         "--silent",
                         "--show-error",
                         "--location",
-                        "'https://github.com/chrono-harness/chrono-harness-host-release/releases/download/v0.1.0-alpha.21/chrono-host-release-linux-x86_64'",
+                        "'https://github.com/chrono-harness/chrono-harness-host-release/releases/download/v0.1.3/chrono-host-release-linux-x86_64'",
                         "--output",
                         r#""$directory/chrono-host-release""#,
                     ],
@@ -628,21 +664,28 @@ mod native {
                     take(
                         "subshell",
                         &[
-                            r#"cd "$directory" && echo '53f966841373df821abf14eb726907ed2c6192bf948e8743fa4952e0818fd5e3  chrono-host-release' | sha256sum --check --status"#,
+                            r#"cd "$directory" && echo '96dd49fd2c6ad7bac8938ac351459e9b8751f7c917a7239e15994b26771a9a4e  chrono-host-release' | sha256sum --check --status"#,
                         ],
                     ) && take(
                         "command",
                         &["chmod", "700", r#""$directory/chrono-host-release""#],
                     )
                 }
-                Stage::CheckTag => take(
-                    "command",
-                    &[
-                        r#""$directory/chrono-host-release""#,
-                        "check-pushed-tag",
-                        r#""$GITHUB_REF_NAME""#,
-                    ],
-                ),
+                Stage::CheckTag => {
+                    take(
+                        "variable_assignment",
+                        &[
+                            "prerelease",
+                            r#"$("$directory/chrono-host-release" check-pushed-tag "$GITHUB_REF_NAME" --prerelease)"#,
+                        ],
+                    ) && take(
+                        "redirected_statement",
+                        &[
+                            r#"printf 'prerelease=%s\n' "$prerelease""#,
+                            r#">> "$GITHUB_OUTPUT""#,
+                        ],
+                    )
+                }
             };
             if !valid {
                 return false;
@@ -663,10 +706,20 @@ mod native {
                 "check-pushed-tag main",
             ),
             ("needs: source", "needs: source\n    if: always()"),
-            ("needs: build", "needs: source"),
+            ("needs: [source, build]", "needs: [source]"),
+            ("needs: [source, build]", "needs: [build]"),
+            (
+                "steps.tag.outputs.prerelease",
+                "steps.other.outputs.prerelease",
+            ),
+            (
+                "needs.source.outputs.prerelease",
+                "needs.build.outputs.prerelease",
+            ),
+            (r#"--prerelease="$PRERELEASE""#, "--prerelease=false"),
             ("  source:\n", "  source:\n    continue-on-error: true\n"),
             ("tags: ['v*']", "tags: ['*']"),
-            ("echo '53f96684", "echo '03f96684"),
+            ("echo '96dd49fd", "echo '06dd49fd"),
         ] {
             assert!(source.contains(original));
             let drift: Value =
