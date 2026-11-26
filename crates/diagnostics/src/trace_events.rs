@@ -6,6 +6,46 @@ use crate::verus;
 use vstd::prelude::*;
 
 verus! {
+/// The JSON reply to exactly one write or flush on the producer's sink.
+#[cfg_attr(not(verus_keep_ghost), derive(serde::Deserialize))]
+#[cfg_attr(not(verus_keep_ghost), serde(rename_all = "snake_case", deny_unknown_fields))]
+pub enum Acknowledgment {
+    Ok,
+    Error { native_code: Option<i32>, kind: String, custom_source: bool, message: String },
+}
+
+pub fn acknowledged<E, R, N, W>(sent: Result<(), E>, read: R, native: N, writer: W) -> (out: Result<(), E>)
+where
+    R: FnOnce() -> Result<Acknowledgment, E>, N: FnOnce(i32) -> E, W: FnOnce(String, bool, String) -> E,
+    requires read.requires(()), forall|n:i32| native.requires((n,)),
+        forall|k:String, c:bool, m:String| writer.requires((k,c,m)),
+    ensures match sent {
+        Err(e) => out == Err::<(), E>(e),
+        Ok(()) => exists|reply: Result<Acknowledgment,E>| #[trigger] read.ensures((),reply) &&
+            match reply {
+                Err(e) => out == Err::<(),E>(e),
+                Ok(Acknowledgment::Ok) => out == Ok::<(),E>(()),
+                Ok(Acknowledgment::Error { native_code, kind, custom_source, message }) =>
+                    match out {
+                        Err(e) => match native_code {
+                            Some(n) => native.ensures((n,), e),
+                            None => writer.ensures((kind,custom_source,message), e),
+                        },
+                        Ok(()) => false,
+                    }
+            }
+    },
+{
+    sent?;
+    match read()? {
+        Acknowledgment::Ok => Ok(()),
+        Acknowledgment::Error { native_code, kind, custom_source, message } => Err(match native_code {
+            Some(n) => native(n),
+            None => writer(kind, custom_source, message),
+        }),
+    }
+}
+
 /// Keep a stream failure first, followed by every original finish failure in order.
 pub fn ordered_errors<T>(stream: Option<T>, mut finished: Vec<T>) -> (out: Vec<T>)
     ensures out@ == match stream { None => finished@, Some(error) => seq![error] + finished@ },
@@ -67,19 +107,6 @@ enum Reply<'a> {
 }
 
 #[cfg(not(verus_keep_ghost))]
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-enum Acknowledgment {
-    Ok,
-    Error {
-        native_code: Option<i32>,
-        kind: String,
-        custom_source: bool,
-        message: String,
-    },
-}
-
-#[cfg(not(verus_keep_ghost))]
 struct Channel<R, W> {
     input: R,
     output: W,
@@ -110,24 +137,18 @@ impl<R: BufRead, W: Write> Channel<R, W> {
     }
 
     fn publish(&mut self, reply: Reply<'_>) -> io::Result<()> {
-        self.send(reply)?;
-        match self.read()? {
-            Acknowledgment::Ok => Ok(()),
-            Acknowledgment::Error {
-                native_code,
-                kind,
-                custom_source,
-                message,
-            } => Err(native_code
-                .map(io::Error::from_raw_os_error)
-                .unwrap_or_else(|| {
-                    io::Error::other(WriterError {
-                        kind,
-                        custom_source,
-                        message,
-                    })
-                })),
-        }
+        acknowledged(
+            self.send(reply),
+            || self.read(),
+            io::Error::from_raw_os_error,
+            |kind, custom_source, message| {
+                io::Error::other(WriterError {
+                    kind,
+                    custom_source,
+                    message,
+                })
+            },
+        )
     }
 }
 

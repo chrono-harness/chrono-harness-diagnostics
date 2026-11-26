@@ -457,6 +457,38 @@ use chrono_diagnostics::trace_events;
 use policy::trace_events;
 
 verus! {
+fn acknowledgment_precedence(send_error: bool, read_error: bool, native_code: Option<i32>,
+    kind: String, custom: bool, message: String) {
+    use trace_events::{Acknowledgment, acknowledged};
+    let sent = if send_error { Err(70i32) } else { Ok(()) };
+    let ack = || -> (r: Result<Acknowledgment,i32>)
+        ensures r == if read_error { Err::<Acknowledgment,i32>(80i32) } else {
+            Ok::<Acknowledgment,i32>(Acknowledgment::Error { native_code, kind, custom_source: custom, message })
+        }
+    {
+        if read_error { Err(80i32) } else { Ok(Acknowledgment::Error { native_code, kind, custom_source: custom, message }) }
+    };
+    let native = |n: i32| -> (e:i32) ensures e == n { n };
+    let writer = |k:String, c:bool, m:String| -> (e:i32)
+        ensures e == if c { 91i32 } else { 92i32 }
+    { if c { 91i32 } else { 92i32 } };
+    let observed = acknowledged(sent, ack, native, writer);
+    assert(observed == Err::<(),i32>(if send_error { 70i32 } else if read_error { 80i32 }
+        else if let Some(code) = native_code { code } else if custom { 91i32 } else { 92i32 }));
+}
+
+fn acknowledged_custom_fields(kind: &String, flag: bool, message: &String) {
+    use trace_events::{Acknowledgment, acknowledged};
+    let read = || -> (r:Result<Acknowledgment,(String,bool,String)>)
+        ensures r == Ok::<Acknowledgment,(String,bool,String)>(Acknowledgment::Error {
+            native_code: None, kind: *kind, custom_source: flag, message: *message })
+    { Ok(Acknowledgment::Error {native_code: None, kind: kind.clone(), custom_source: flag, message: message.clone()}) };
+    let native = |n:i32| -> (String,bool,String) { (String::new(),false,String::new()) };
+    let custom = |k:String,c:bool,m:String| -> (e:(String,bool,String)) ensures e == (k,c,m) { (k,c,m) };
+    let result = acknowledged(Ok(()), read, native, custom);
+    assert(result == Err::<(),(String,bool,String)>((*kind,flag,*message)));
+}
+
 #[cfg_attr(not(verus_keep_ghost), test)]
 fn terminal_status_and_error_order_follow_the_delivered_reply() {
     let mut later = Vec::new();
@@ -475,6 +507,29 @@ fn terminal_status_and_error_order_follow_the_delivered_reply() {
 
 #[cfg(not(verus_keep_ghost))]
 use std::io::{self, Write};
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn sending_a_failed_reply_never_consumes_an_acknowledgment() {
+    use std::cell::Cell;
+    let reads = Cell::new(0);
+    let read = || {
+        reads.set(reads.get() + 1);
+        Ok(trace_events::Acknowledgment::Ok)
+    };
+    let native = |code| code;
+    let writer = |_, _, _| 92;
+    assert_eq!(
+        trace_events::acknowledged(Err(32), read, native, writer),
+        Err(32)
+    );
+    assert_eq!(reads.get(), 0);
+    assert_eq!(
+        trace_events::acknowledged(Ok(()), read, native, writer),
+        Ok(())
+    );
+    assert_eq!(reads.get(), 1);
+}
 
 #[cfg(not(verus_keep_ghost))]
 #[test]
