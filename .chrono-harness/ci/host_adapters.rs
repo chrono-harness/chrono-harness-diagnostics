@@ -111,37 +111,41 @@ mod native {
     fn installed_assets_use_the_verified_platforms() {
         let document: toml::Value = toml::from_str(selected_mise_manifest()).unwrap();
         let entries = document["tools"].as_table().unwrap();
-        let commands = [
-            ("chrono-cache", "chrono-harness/chrono-harness-cache"),
-            ("chrono-ci", "chrono-harness/chrono-harness-ci"),
-            ("chrono-diagnostics", "chrono-harness/chrono-harness-diagnostics"),
-            ("chrono-distribution", "chrono-harness/chrono-harness-distribution"),
-            ("chrono-harness", "chrono-harness/chrono-harness-runner"),
-            ("chrono-host-bootstrap", "chrono-harness/chrono-harness-host-bootstrap"),
-            ("chrono-host-release", "chrono-harness/chrono-harness-host-release"),
-            ("chrono-inputs", "chrono-harness/chrono-harness-inputs"),
-            ("chrono-instructions", "chrono-harness/chrono-harness-instructions"),
-            ("chrono-judge-ci", "chrono-harness/chrono-harness-judge-ci"),
-            ("chrono-judge-cost", "chrono-harness/chrono-harness-judge-cost"),
-            ("chrono-judge-filemap", "chrono-harness/chrono-harness-judge-filemap"),
-            ("chrono-judge-mixed", "chrono-harness/chrono-harness-judge-mixed"),
-            ("chrono-judge-projects", "chrono-harness/chrono-harness-judge-projects"),
-            ("chrono-judge-registration", "chrono-harness/chrono-harness-judge-registration"),
-            ("chrono-judge-routes", "chrono-harness/chrono-harness-judge-routes"),
-            ("chrono-judge-workflow", "chrono-harness/chrono-harness-judge-workflow"),
-            ("chrono-pr", "chrono-harness/chrono-harness-pr"),
-            ("chrono-test-git", "chrono-harness/chrono-harness-test-git"),
-            ("chrono-test-git-profile", "chrono-harness/chrono-harness-test-git"),
-            ("chrono-worktree", "chrono-harness/chrono-harness-worktree"),
-        ];
-        assert_eq!(entries.len(), commands.len());
-        for (command, repository) in commands {
-            let platforms = entries[&format!("http:{command}")]["platforms"].as_table().unwrap();
+        assert_eq!(entries.len(), 21);
+        for (key, tool) in entries {
+            let command = key.strip_prefix("http:").unwrap();
+            let repository = match command {
+                "chrono-cache" => "chrono-harness/chrono-harness-cache",
+                "chrono-ci" => "chrono-harness/chrono-harness-ci",
+                "chrono-diagnostics" => "chrono-harness/chrono-harness-diagnostics",
+                "chrono-distribution" => "chrono-harness/chrono-harness-distribution",
+                "chrono-harness" => "chrono-harness/chrono-harness-runner",
+                "chrono-host-bootstrap" => "chrono-harness/chrono-harness-host-bootstrap",
+                "chrono-host-release" => "chrono-harness/chrono-harness-host-release",
+                "chrono-inputs" => "chrono-harness/chrono-harness-inputs",
+                "chrono-instructions" => "chrono-harness/chrono-harness-instructions",
+                "chrono-judge-ci" => "chrono-harness/chrono-harness-judge-ci",
+                "chrono-judge-cost" => "chrono-harness/chrono-harness-judge-cost",
+                "chrono-judge-filemap" => "chrono-harness/chrono-harness-judge-filemap",
+                "chrono-judge-mixed" => "chrono-harness/chrono-harness-judge-mixed",
+                "chrono-judge-projects" => "chrono-harness/chrono-harness-judge-projects",
+                "chrono-judge-registration" => "chrono-harness/chrono-harness-judge-registration",
+                "chrono-judge-routes" => "chrono-harness/chrono-harness-judge-routes",
+                "chrono-judge-workflow" => "chrono-harness/chrono-harness-judge-workflow",
+                "chrono-pr" => "chrono-harness/chrono-harness-pr",
+                "chrono-test-git" => "chrono-harness/chrono-harness-test-git",
+                "chrono-test-git-profile" => "chrono-harness/chrono-harness-test-git",
+                "chrono-worktree" => "chrono-harness/chrono-harness-worktree",
+                _ => panic!("unexpected selected tool {command}"),
+            };
+            let platforms = tool["platforms"].as_table().unwrap();
             assert_eq!(platforms.len(), 2);
             for (name, linux) in [("linux-x64", true), ("macos-arm64", false)] {
                 let (suffix, index) = installed_asset(linux);
                 let selected = format!("vars.selected_{}", command.replace('-', "_"));
-                let pin = format!(r#"read_toml(path=vars.chrono_pins)["tools"]["http:{command}"]["platforms"]["{name}"]"#);
+                let pin = format!(
+                    r#"read_toml(path=vars.chrono_pins)["tools"]["http:{command}"]["platforms"]["{name}"]"#
+                );
                 let url = r#"{% if SELECTED %}https://github.com/REPOSITORY/releases/download/v{{ SELECTED }}/ASSET{% else %}{{ PLATFORM["url"] }}{% endif %}"#
                     .replace("SELECTED", &selected)
                     .replace("PLATFORM", &pin)
@@ -153,7 +157,10 @@ mod native {
                     .replace("COMMAND", command)
                     .replace("INDEX", &index.to_string());
                 assert_eq!(platforms[name]["url"].as_str(), Some(url.as_str()));
-                assert_eq!(platforms[name]["checksum"].as_str(), Some(checksum.as_str()));
+                assert_eq!(
+                    platforms[name]["checksum"].as_str(),
+                    Some(checksum.as_str())
+                );
             }
         }
     }
