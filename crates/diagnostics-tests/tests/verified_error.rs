@@ -14,6 +14,25 @@ verus! {
 
 broadcast use vstd::string::group_string_axioms;
 
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn records_each_io_cause_and_marks_only_unrecorded_sources() {
+    use policy::cause::{IoCause,select_io_cause};
+    let known = select_io_cause(true, Some(17u8), None::<u16>, None::<u32>, None);
+    match known { IoCause::Application(value) => expect(value == 17), _ => expect(false) }
+    let channel = select_io_cause(true, None::<u8>, Some(29u16), None::<u32>, None);
+    match channel { IoCause::Channel(value) => expect(value == 29), _ => expect(false) }
+    let json = select_io_cause(true, None::<u8>, None::<u16>, Some(47u32), None);
+    match json { IoCause::Serialization(value) => expect(value == 47), _ => expect(false) }
+    let os = select_io_cause(false, None::<u8>, None::<u16>, None::<u32>, None);
+    match os { IoCause::None => {}, _ => expect(false) }
+    let known_writer = select_io_cause(true, None::<u8>, None::<u16>, None::<u32>, Some(false));
+    match known_writer { IoCause::None => {}, _ => expect(false) }
+    let opaque_writer = select_io_cause(true, None::<u8>, None::<u16>, None::<u32>, Some(true));
+    match opaque_writer { IoCause::Opaque => {}, _ => expect(false) }
+    let unknown = select_io_cause(true, None::<u8>, None::<u16>, None::<u32>, None);
+    match unknown { IoCause::Opaque => {}, _ => expect(false) }
+}
+
 struct Node {
     code: u64,
     bytes: Vec<u8>,
@@ -291,4 +310,21 @@ fn detaching_and_restoring_source_keeps_related_and_all_other_fields() {
     }
 }
 
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn native_io_keeps_the_typed_application_error_with_its_context() {
+    use chrono_diagnostics::error::{Failure, NativeIoError, RecordedError};
+    use std::io;
+
+    let cause = Failure::new("E_FETCH", "failed to read input").at("attempt", 3);
+    let expected = cause.error_node();
+    let outer = NativeIoError::new(io::Error::other(cause)).error_node();
+    let native = outer.source.unwrap();
+    assert_eq!(native.code, "io::Other");
+    assert_eq!(native.message, expected.message);
+    assert_eq!(native.native_code, None);
+    assert!(!native.context.contains_key("custom_source"));
+    assert_eq!(native.source.as_deref(), Some(&expected));
 }
