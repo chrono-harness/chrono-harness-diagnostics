@@ -37,10 +37,10 @@ test = false
 bench = false
 
 [dev-dependencies]
-sha2 = "0.10"
+sha2 = "0.11"
 serde_yaml = "0.9"
-toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
-tree-sitter = "0.25"
+toml = { version = "1.2", default-features = false, features = ["parse", "serde", "std"] }
+tree-sitter = "0.27"
 tree-sitter-bash = "0.25"
 
 [[test]]
