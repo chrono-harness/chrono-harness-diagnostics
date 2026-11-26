@@ -421,6 +421,27 @@
       }
     },
     {
+      "path": ".github/workflows/actions.lock",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": ".chrono-harness/ci/host_adapters.rs",
+            "operation": "verify.host-adapters"
+          }
+        ]
+      }
+    },
+    {
       "path": ".github/workflows/check.yml",
       "owner": "host",
       "surface": "product",
@@ -430,7 +451,11 @@
           "kind": "test-execution",
           "to": "test:diagnostics-tests"
         }
-      ]
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
     },
     {
       "path": ".github/workflows/release.yml",
