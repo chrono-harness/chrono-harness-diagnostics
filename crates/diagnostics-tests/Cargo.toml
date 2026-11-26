@@ -37,6 +37,7 @@ test = false
 bench = false
 
 [dev-dependencies]
+sha2 = "0.10"
 serde_yaml = "0.9"
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 tree-sitter = "0.25"
