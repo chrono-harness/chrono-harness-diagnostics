@@ -68,6 +68,10 @@ pub fn mise_manifest() -> (s: &'static str) {
     include_str!("../../.config/mise/conf.d/chrono-harness.toml")
 }
 
+pub fn selected_mise_manifest() -> (s: &'static str) {
+    include_str!("../../.config/mise/conf.d/selected-chrono-harness.toml")
+}
+
 pub fn tool_installer() -> (s: &'static str) { include_str!("../install-tools.sh") }
 
 pub fn installer() -> (s: &'static str) { include_str!("install.sh") }
@@ -255,6 +259,19 @@ mod native {
             );
         }
         assert_eq!(selected, expected);
+
+        let projection = selected_mise_manifest().parse::<toml::Table>().unwrap();
+        let projected: BTreeSet<_> = projection["tools"]
+            .as_table()
+            .unwrap()
+            .iter()
+            .map(|(key, tool)| {
+                let command = tool["bin"].as_str().unwrap();
+                assert_eq!(key.strip_prefix("http:"), Some(command));
+                command.strip_prefix("chrono-").unwrap()
+            })
+            .collect();
+        assert_eq!(projected, expected);
     }
 
     #[test]
