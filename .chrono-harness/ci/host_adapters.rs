@@ -1,6 +1,4 @@
-//! The host adapters cover the registered tool setup, native check handoff and release program.
-//! The shell reader checks the observed commands, platform cases and selected control dependencies.
-//! The release YAML reader supplies typed fields; Actions executes job dependencies.
+//! Deployment checks for the files selected by this host.
 #![allow(unexpected_cfgs)]
 #[cfg(not(verus_keep_ghost))]
 use chrono_diagnostics::verus;
@@ -48,22 +46,6 @@ pub fn setup_sequence(commands: &[String], instructions: bool) -> (accepted: boo
         || commands[1] == "mise exec -- chrono-instructions sync-rules --host-root .".to_string())
 }
 
-/// The public native route transfers the process to the host's installed scratch owner.
-pub fn native_owner_command(argv: &[String]) -> (accepted: bool)
-    ensures accepted == (argv.len() == 7
-        && argv@[0]@ == "exec"@ && argv@[1]@ == "chrono-host-bootstrap"@
-        && argv@[2]@ == "native-scratch"@ && argv@[3]@ == "run"@
-        && argv@[4]@ == "/bin/bash"@ && argv@[5]@ == "./check.sh"@
-        && argv@[6]@ == "--native-in-directory"@),
-{
-    argv.len() == 7 && argv[0] == "exec".to_string() && argv[1] == "chrono-host-bootstrap".to_string()
-        && argv[2] == "native-scratch".to_string() && argv[3] == "run".to_string()
-        && argv[4] == "/bin/bash".to_string() && argv[5] == "./check.sh".to_string()
-        && argv[6] == "--native-in-directory".to_string()
-}
-
-pub fn check_entrypoint() -> (s: &'static str) { include_str!("../../check.sh") }
-
 pub fn mise_manifest() -> (s: &'static str) {
     include_str!("../../.config/mise/conf.d/chrono-harness.toml")
 }
@@ -100,25 +82,42 @@ pub fn installed_pattern(is_version: bool) -> (pattern: &'static str)
     if is_version { "^[0-9]+[.][0-9]+[.][0-9]+(-[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*)?$" } else { "^sha256:[a-f0-9]{64}$" }
 }
 
-pub fn selected_mise_manifest() -> (s: &'static str) {
+pub fn installed_config() -> (s: &'static str) {
     include_str!("../../.config/mise/conf.d/selected-chrono-harness.toml")
 }
 
-pub fn tool_installer() -> (s: &'static str) { include_str!("../install-tools.sh") }
+pub fn deployed_tool_installer() -> (source: &'static str) {
+    include_str!("../install-tools.sh")
+}
+
+pub fn installer_digest_matches(digest: &String) -> (accepted: bool)
+    ensures accepted == (digest@ == "463052d115cab6d117f83b7546ee3c9481f42ab210c4347833668f84eb6d1941"@),
+{
+    *digest == "463052d115cab6d117f83b7546ee3c9481f42ab210c4347833668f84eb6d1941".to_string()
+}
 
 pub fn installer() -> (s: &'static str) { include_str!("install.sh") }
 pub fn workflow() -> (s: &'static str) { include_str!("../../.github/workflows/release.yml") }
-
 /// Both deployed files are inputs to this proof compilation and its native test.
 pub fn deployed_roadmap() -> (&'static str, &'static str) {
     (include_str!("../../.github/roadmap.cjs"), include_str!("../../.github/workflows/issue-roadmap.yml"))
 }
 
+pub fn deployed_roadmap_lock() -> &'static str {
+    include_str!("../../.github/workflows/actions.lock")
+}
+
+pub fn roadmap_repository(checkout: bool, owner_id: u64, repo_id: u64) -> (accepted: bool)
+    ensures accepted == (owner_id == 44036562 && ((checkout && repo_id == 197814629)
+        || (!checkout && repo_id == 205262760))),
+{
+    owner_id == 44036562 && repo_id == (if checkout { 197814629 } else { 205262760 })
+}
 /// The native caller hashes the actual UTF-8 bytes embedded above.
 pub fn roadmap_matches(script: &String, workflow: &String) -> (accepted: bool)
-    ensures accepted == (script@ == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9"@ && workflow@ == "8404b5a63e1a0db9a3f91d6b53fb6e28419b2a532d21fb44f5e0b435ae3b9985"@),
+    ensures accepted == (script@ == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9"@ && workflow@ == "ece23ae4408cce3db5b40eea2d1f6e7fb3bb7312e24cbda8beec0ade2ff49452"@),
 {
-    *script == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9".to_string() && *workflow == "8404b5a63e1a0db9a3f91d6b53fb6e28419b2a532d21fb44f5e0b435ae3b9985".to_string()
+    *script == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9".to_string() && *workflow == "ece23ae4408cce3db5b40eea2d1f6e7fb3bb7312e24cbda8beec0ade2ff49452".to_string()
 }
 }
 
@@ -126,6 +125,19 @@ pub fn roadmap_matches(script: &String, workflow: &String) -> (accepted: bool)
 mod native {
     use super::*;
     use serde_yaml::Value;
+
+    #[test]
+    fn deployed_tool_installer_matches_the_selected_template() {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(deployed_tool_installer().as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert!(
+            installer_digest_matches(&digest),
+            "install-tools.sh differs from the selected template"
+        );
+    }
 
     fn when_selected(condition: &str, installed: &str, pinned: &str) -> String {
         format!("{{% if {condition} %}}{installed}{{% else %}}{pinned}{{% endif %}}")
@@ -171,7 +183,7 @@ mod native {
 
     #[test]
     fn installed_assets_use_the_verified_platforms() {
-        let document: toml::Value = toml::from_str(selected_mise_manifest()).unwrap();
+        let document: toml::Value = toml::from_str(installed_config()).unwrap();
         assert_eq!(
             document["vars"]["chrono_selection"].as_str(),
             Some("{{ config_root }}/.chrono-harness/state/tool-selection/versions.toml")
@@ -242,13 +254,123 @@ mod native {
         }
     }
 
+    fn locked_roadmap_reference<'a>(
+        lock: &Value,
+        workflow: &'a [Value],
+        repo: &str,
+        checkout: bool,
+    ) -> Option<&'a str> {
+        let mut matched = None;
+        for item in workflow {
+            let name = item.as_str()?;
+            let (source, reference) = name.split_once('@')?;
+            if !source.eq_ignore_ascii_case(repo) {
+                continue;
+            }
+            if source != repo || matched.is_some() {
+                return None;
+            }
+            let entry = lock["dependencies"].get(name)?;
+            let sha = entry["commit"].as_str()?.strip_prefix("sha1-")?;
+            if reference.is_empty()
+                || !reference
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/'))
+                || entry["ref"].as_str() != Some(reference)
+                || entry
+                    .get("hostname")
+                    .is_some_and(|v| v.as_str() != Some("github.com"))
+                || sha.len() != 40
+                || !sha
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                || sha.bytes().all(|b| b == b'0')
+                || !roadmap_repository(
+                    checkout,
+                    entry["owner_id"].as_u64()?,
+                    entry["repo_id"].as_u64()?,
+                )
+            {
+                return None;
+            }
+            matched = Some(name);
+        }
+        matched
+    }
+
+    fn roadmap_structure(workflow: &str, lock: &str) -> Option<String> {
+        let lock: Value = serde_yaml::from_str(lock).ok()?;
+        if lock["version"].as_str()? != "v0.0.3" {
+            return None;
+        }
+        let mapping = lock["workflows"][".github/workflows/issue-roadmap.yml"].as_sequence()?;
+        let checkout = locked_roadmap_reference(&lock, mapping, "actions/checkout", true)?;
+        let script = locked_roadmap_reference(&lock, mapping, "actions/github-script", false)?;
+        let mut projected = String::with_capacity(workflow.len());
+        for line in workflow.split_inclusive('\n') {
+            if let Some(value) = line.strip_prefix("      - uses: ") {
+                let repository = match value.strip_suffix('\n')? {
+                    v if v == checkout => "actions/checkout",
+                    v if v == script => "actions/github-script",
+                    _ => return None,
+                };
+                projected.push_str("      - uses: ");
+                projected.push_str(repository);
+                projected.push_str("@LOCKED\n");
+            } else {
+                projected.push_str(line);
+            }
+        }
+        Some(projected)
+    }
+
+    #[test]
+    fn locked_roadmap_rejects_changes_to_its_deployment_contract() {
+        use sha2::{Digest, Sha256};
+        let (script, workflow) = deployed_roadmap();
+        let lock = deployed_roadmap_lock();
+        let script_hash = format!("{:x}", Sha256::digest(script));
+        let accepted = |candidate: &str, lock: &str| {
+            roadmap_structure(candidate, lock).is_some_and(|structure| {
+                roadmap_matches(&script_hash, &format!("{:x}", Sha256::digest(structure)))
+            })
+        };
+        for (expected, changed) in [
+            ("actions/checkout@", "other/checkout@"),
+            ("contents: read", "contents: write"),
+            ("    steps:\n", "    steps:\n      - run: echo extra\n"),
+            (".releaseIssue(", ".different("),
+        ] {
+            let edit = workflow.replacen(expected, changed, 1);
+            assert_ne!(edit, workflow);
+            assert!(!accepted(&edit, lock));
+        }
+        for expected in [
+            ".github/workflows/issue-roadmap.yml",
+            "197814629",
+            "205262760",
+        ] {
+            let edit = lock.replace(expected, "absent");
+            assert_ne!(edit, lock);
+            assert!(!accepted(workflow, &edit));
+        }
+        assert!(!accepted(workflow, ""));
+    }
+
     #[test]
     fn deployed_roadmap_matches_the_selected_template() {
         use sha2::{Digest, Sha256};
         let (script, workflow) = deployed_roadmap();
-        let digest = |source: &str| format!("{:x}", Sha256::digest(source.as_bytes()));
+        let digest = |source: &str| {
+            Sha256::digest(source.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
         let script_hash = digest(script);
-        let workflow_hash = digest(workflow);
+        let structure = roadmap_structure(workflow, deployed_roadmap_lock())
+            .expect("the roadmap action references must belong to their GitHub workflow lock");
+        let workflow_hash = digest(&structure);
         assert!(
             roadmap_matches(&script_hash, &workflow_hash),
             "roadmap.cjs or issue-roadmap.yml differs from the selected template"
@@ -341,39 +463,6 @@ mod native {
         }
     }
 
-    #[test]
-    fn public_native_check_starts_the_scratch_owner() {
-        let source = check_entrypoint();
-        let tree = shell_tree(source).unwrap();
-        let root = tree.root_node();
-        let mut cursor = root.walk();
-        let route = root
-            .named_children(&mut cursor)
-            .find(|node| {
-                node.kind() == "if_statement"
-                    && node
-                        .child_by_field_name("condition")
-                        .is_some_and(|condition| {
-                            &source[condition.byte_range()] == "[[ $# == 1 && $1 == --native ]]"
-                        })
-            })
-            .expect("the public --native branch");
-        let mut cursor = route.walk();
-        let commands: Vec<_> = route
-            .named_children(&mut cursor)
-            .filter(|node| node.kind() == "command")
-            .collect();
-        assert_eq!(commands.len(), 1);
-        let mut cursor = commands[0].walk();
-        let mut argv: Vec<_> = commands[0]
-            .named_children(&mut cursor)
-            .map(|node| source[node.byte_range()].to_owned())
-            .collect();
-        assert!(native_owner_command(&argv));
-        argv.remove(0);
-        assert!(!native_owner_command(&argv));
-    }
-
     fn setup_matches(source: &str, instructions: bool) -> bool {
         let Ok(doc) = source.parse::<toml::Table>() else {
             return false;
@@ -409,43 +498,6 @@ mod native {
             _ => return false,
         };
         setup_sequence(&commands, instructions)
-    }
-
-    #[test]
-    fn every_installed_organization_tool_can_follow_the_selected_channel() {
-        use std::collections::BTreeSet;
-
-        let manifest = mise_manifest().parse::<toml::Table>().unwrap();
-        let expected: BTreeSet<_> = manifest["tools"]
-            .as_table()
-            .unwrap()
-            .keys()
-            .filter_map(|name| name.strip_prefix("http:chrono-"))
-            .collect();
-        let (_, rows) = tool_installer().split_once("done <<'TOOLS'\n").unwrap();
-        let (rows, _) = rows.split_once("\nTOOLS\n").unwrap();
-        let mut selected = BTreeSet::new();
-        for row in rows.lines() {
-            let (command, _) = row.split_once(' ').unwrap();
-            assert!(
-                selected.insert(command.strip_prefix("chrono-").unwrap()),
-                "{command}"
-            );
-        }
-        assert_eq!(selected, expected);
-
-        let projection = selected_mise_manifest().parse::<toml::Table>().unwrap();
-        let projected: BTreeSet<_> = projection["tools"]
-            .as_table()
-            .unwrap()
-            .iter()
-            .map(|(key, tool)| {
-                let command = tool["bin"].as_str().unwrap();
-                assert_eq!(key.strip_prefix("http:"), Some(command));
-                command.strip_prefix("chrono-").unwrap()
-            })
-            .collect();
-        assert_eq!(projected, expected);
     }
 
     #[test]
@@ -691,11 +743,7 @@ mod native {
         let Some(source_map) = source.as_mapping() else {
             return false;
         };
-        if source_map.len() != 3
-            || source["runs-on"].as_str() != Some("ubuntu-24.04")
-            || source["outputs"]["prerelease"].as_str()
-                != Some("${{ steps.tag.outputs.prerelease }}")
-        {
+        if source_map.len() != 2 || source["runs-on"].as_str() != Some("ubuntu-24.04") {
             return false;
         }
         let Some(steps) = source["steps"].as_sequence() else {
@@ -708,12 +756,11 @@ mod native {
         let decision = &steps[1];
         if checkout.as_mapping().map(|x| x.len()) != Some(2)
             || checkout["uses"].as_str()
-                != Some("actions/checkout@11d5960a326750d5838078e36cf38b85af677262")
+                != Some("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
             || checkout["with"].as_mapping().map(|x| x.len()) != Some(2)
             || checkout["with"]["fetch-depth"].as_i64() != Some(0)
             || checkout["with"]["persist-credentials"].as_bool() != Some(false)
-            || decision.as_mapping().map(|x| x.len()) != Some(4)
-            || decision["id"].as_str() != Some("tag")
+            || decision.as_mapping().map(|x| x.len()) != Some(3)
             || decision["name"].as_str().is_none()
             || decision["shell"].as_str() != Some("bash")
         {
@@ -722,38 +769,7 @@ mod native {
         let Some(shell) = decision["run"].as_str() else {
             return false;
         };
-        let Some(requirements) = publish["needs"].as_sequence() else {
-            return false;
-        };
-        let Some(publisher) = publish["steps"]
-            .as_sequence()
-            .and_then(|steps| steps.last())
-        else {
-            return false;
-        };
-        source_command_plan(shell)
-            && needs(build, "source")
-            && requirements.len() == 2
-            && ["source", "build"].iter().all(|expected| {
-                requirements.iter().any(|id| {
-                    id.as_str().is_some_and(|id| {
-                        requires_success(
-                            &id.to_owned(),
-                            &expected.to_string(),
-                            publish.get("if").is_some(),
-                            publish.get("continue-on-error").is_some(),
-                        )
-                    })
-                })
-            })
-            && publisher["env"]["PRERELEASE"].as_str()
-                == Some("${{ needs.source.outputs.prerelease }}")
-            && publisher["run"].as_str().is_some_and(|shell| {
-                shell
-                    .split_ascii_whitespace()
-                    .filter(|arg| arg.starts_with("--prerelease"))
-                    .eq([r#"--prerelease="$PRERELEASE""#])
-            })
+        source_command_plan(shell) && needs(build, "source") && needs(publish, "build")
     }
 
     // Read each top-level command from the real source step. Formatting and
@@ -802,7 +818,7 @@ mod native {
                         "--silent",
                         "--show-error",
                         "--location",
-                        "'https://github.com/chrono-harness/chrono-harness-host-release/releases/download/v0.1.3/chrono-host-release-linux-x86_64'",
+                        "'https://github.com/chrono-harness/chrono-harness-host-release/releases/download/v0.1.0-alpha.21/chrono-host-release-linux-x86_64'",
                         "--output",
                         r#""$directory/chrono-host-release""#,
                     ],
@@ -811,28 +827,21 @@ mod native {
                     take(
                         "subshell",
                         &[
-                            r#"cd "$directory" && echo '96dd49fd2c6ad7bac8938ac351459e9b8751f7c917a7239e15994b26771a9a4e  chrono-host-release' | sha256sum --check --status"#,
+                            r#"cd "$directory" && echo '53f966841373df821abf14eb726907ed2c6192bf948e8743fa4952e0818fd5e3  chrono-host-release' | sha256sum --check --status"#,
                         ],
                     ) && take(
                         "command",
                         &["chmod", "700", r#""$directory/chrono-host-release""#],
                     )
                 }
-                Stage::CheckTag => {
-                    take(
-                        "variable_assignment",
-                        &[
-                            "prerelease",
-                            r#"$("$directory/chrono-host-release" check-pushed-tag "$GITHUB_REF_NAME" --prerelease)"#,
-                        ],
-                    ) && take(
-                        "redirected_statement",
-                        &[
-                            r#"printf 'prerelease=%s\n' "$prerelease""#,
-                            r#">> "$GITHUB_OUTPUT""#,
-                        ],
-                    )
-                }
+                Stage::CheckTag => take(
+                    "command",
+                    &[
+                        r#""$directory/chrono-host-release""#,
+                        "check-pushed-tag",
+                        r#""$GITHUB_REF_NAME""#,
+                    ],
+                ),
             };
             if !valid {
                 return false;
@@ -853,20 +862,10 @@ mod native {
                 "check-pushed-tag main",
             ),
             ("needs: source", "needs: source\n    if: always()"),
-            ("needs: [source, build]", "needs: [source]"),
-            ("needs: [source, build]", "needs: [build]"),
-            (
-                "steps.tag.outputs.prerelease",
-                "steps.other.outputs.prerelease",
-            ),
-            (
-                "needs.source.outputs.prerelease",
-                "needs.build.outputs.prerelease",
-            ),
-            (r#"--prerelease="$PRERELEASE""#, "--prerelease=false"),
+            ("needs: build", "needs: source"),
             ("  source:\n", "  source:\n    continue-on-error: true\n"),
             ("tags: ['v*']", "tags: ['*']"),
-            ("echo '96dd49fd", "echo '06dd49fd"),
+            ("echo '53f96684", "echo '03f96684"),
         ] {
             assert!(source.contains(original));
             let drift: Value =

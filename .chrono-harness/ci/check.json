@@ -24,7 +24,8 @@
       ".config/mise/conf.d/chrono-harness.toml",
       ".chrono-harness/ci/install.sh",
       ".github/workflows/check.yml",
-      ".chrono-harness/retention.json"
+      ".chrono-harness/retention.json",
+      ".github/workflows/actions.lock"
     ],
     "operation_timeout_seconds": 600,
     "operation_output_limit_bytes": 2097152,
