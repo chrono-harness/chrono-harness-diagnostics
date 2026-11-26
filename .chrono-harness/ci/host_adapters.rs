@@ -76,12 +76,39 @@ pub fn tool_installer() -> (s: &'static str) { include_str!("../install-tools.sh
 
 pub fn installer() -> (s: &'static str) { include_str!("install.sh") }
 pub fn workflow() -> (s: &'static str) { include_str!("../../.github/workflows/release.yml") }
+
+/// Both deployed files are inputs to this proof compilation and its native test.
+pub fn deployed_roadmap() -> (&'static str, &'static str) {
+    (include_str!("../../.github/roadmap.cjs"), include_str!("../../.github/workflows/issue-roadmap.yml"))
+}
+
+/// The native caller hashes the actual UTF-8 bytes embedded above.
+pub fn roadmap_matches(script: &String, workflow: &String) -> (accepted: bool)
+    ensures accepted == (script@ == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9"@ && workflow@ == "8404b5a63e1a0db9a3f91d6b53fb6e28419b2a532d21fb44f5e0b435ae3b9985"@),
+{
+    *script == "5824ea576bd25a792c76e976dc2dcec1c7eb684f6a3a9de9919220a546b61cf9".to_string() && *workflow == "8404b5a63e1a0db9a3f91d6b53fb6e28419b2a532d21fb44f5e0b435ae3b9985".to_string()
+}
 }
 
 #[cfg(not(verus_keep_ghost))]
 mod native {
     use super::*;
     use serde_yaml::Value;
+
+    #[test]
+    fn deployed_roadmap_matches_the_selected_template() {
+        use sha2::{Digest, Sha256};
+        let (script, workflow) = deployed_roadmap();
+        let digest = |source: &str| format!("{:x}", Sha256::digest(source.as_bytes()));
+        let script_hash = digest(script);
+        let workflow_hash = digest(workflow);
+        assert!(
+            roadmap_matches(&script_hash, &workflow_hash),
+            "roadmap.cjs or issue-roadmap.yml differs from the selected template"
+        );
+        assert!(!roadmap_matches(&workflow_hash, &workflow_hash));
+        assert!(!roadmap_matches(&script_hash, &script_hash));
+    }
 
     fn text<'a>(node: tree_sitter::Node<'_>, source: &'a str) -> &'a str {
         node.utf8_text(source.as_bytes()).unwrap()
