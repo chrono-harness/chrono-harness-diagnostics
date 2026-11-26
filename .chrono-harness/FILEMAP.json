@@ -639,7 +639,11 @@
           "kind": "test-execution",
           "to": "test:diagnostics-tests"
         }
-      ]
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
     },
     {
       "path": "crates/diagnostics/Cargo.toml",
@@ -651,7 +655,11 @@
           "kind": "test-execution",
           "to": "test:diagnostics-tests"
         }
-      ]
+      ],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
     },
     {
       "path": "crates/diagnostics/src/error.rs",
