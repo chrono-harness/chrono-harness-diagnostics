@@ -322,6 +322,28 @@
       }
     },
     {
+      "path": ".github/workflows/dependabot-auto-merge.yml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "owner": "host",
+      "surface": "product",
+      "cost": "unmeasured",
+      "edges": [],
+      "verification": {
+        "role": "data",
+        "roots": []
+      }
+    },
+    {
       "path": ".github/ISSUE_TEMPLATE/bug.yml",
       "owner": "host",
       "surface": "documentation",
@@ -357,14 +379,24 @@
       "edges": []
     },
     {
-      "path": ".github/dependabot.yml",
+      "path": ".github/workflows/issue-roadmap.yml",
       "owner": "host",
       "surface": "product",
       "cost": "unmeasured",
-      "edges": [],
+      "edges": [
+        {
+          "kind": "test-execution",
+          "to": "test:diagnostics-tests"
+        }
+      ],
       "verification": {
-        "role": "data",
-        "roots": []
+        "role": "program",
+        "roots": [
+          {
+            "path": ".chrono-harness/ci/host_adapters.rs",
+            "operation": "verify.host-adapters"
+          }
+        ]
       }
     },
     {
@@ -400,8 +432,13 @@
         }
       ],
       "verification": {
-        "role": "data",
-        "roots": []
+        "role": "program",
+        "roots": [
+          {
+            "path": ".chrono-harness/ci/host_adapters.rs",
+            "operation": "verify.host-adapters"
+          }
+        ]
       }
     },
     {
@@ -418,38 +455,6 @@
       "verification": {
         "role": "data",
         "roots": []
-      }
-    },
-    {
-      "path": ".github/workflows/dependabot-auto-merge.yml",
-      "owner": "host",
-      "surface": "product",
-      "cost": "unmeasured",
-      "edges": [],
-      "verification": {
-        "role": "data",
-        "roots": []
-      }
-    },
-    {
-      "path": ".github/workflows/issue-roadmap.yml",
-      "owner": "host",
-      "surface": "product",
-      "cost": "unmeasured",
-      "edges": [
-        {
-          "kind": "test-execution",
-          "to": "test:diagnostics-tests"
-        }
-      ],
-      "verification": {
-        "role": "program",
-        "roots": [
-          {
-            "path": ".chrono-harness/ci/host_adapters.rs",
-            "operation": "verify.host-adapters"
-          }
-        ]
       }
     },
     {
