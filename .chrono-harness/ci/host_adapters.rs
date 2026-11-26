@@ -80,6 +80,26 @@ pub fn installed_asset(linux: bool) -> (fields: (&'static str, usize))
     }
 }
 
+/// mise reports file/key presence and applies the selected Rust-regex expression.
+#[derive(Clone, Copy)]
+pub enum InstalledValue { Pin, Use, Reject }
+
+pub fn installed_value(present: bool, matches: bool) -> (action: InstalledValue)
+    ensures !present ==> action == InstalledValue::Pin,
+        present && matches ==> action == InstalledValue::Use,
+        present && !matches ==> action == InstalledValue::Reject,
+{
+    if !present { InstalledValue::Pin } else if matches { InstalledValue::Use }
+    else { InstalledValue::Reject }
+}
+
+pub fn installed_pattern(is_version: bool) -> (pattern: &'static str)
+    ensures is_version ==> pattern@ == "^[0-9]+[.][0-9]+[.][0-9]+(-[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*)?$"@,
+        !is_version ==> pattern@ == "^sha256:[a-f0-9]{64}$"@,
+{
+    if is_version { "^[0-9]+[.][0-9]+[.][0-9]+(-[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*)?$" } else { "^sha256:[a-f0-9]{64}$" }
+}
+
 pub fn selected_mise_manifest() -> (s: &'static str) {
     include_str!("../../.config/mise/conf.d/selected-chrono-harness.toml")
 }
@@ -107,9 +127,59 @@ mod native {
     use super::*;
     use serde_yaml::Value;
 
+    fn when_selected(condition: &str, installed: &str, pinned: &str) -> String {
+        format!("{{% if {condition} %}}{installed}{{% else %}}{pinned}{{% endif %}}")
+    }
+
+    // Reconstruct the actions of the host's actual mise expressions for every
+    // outcome of its built-in file, TOML lookup and regex operations.
+    fn installed_field_expression(is_version: bool, command: &str, index: usize) -> String {
+        let (value, lookup, field) = if is_version {
+            ("version", format!(r#"data["{command}"][0]"#), "version")
+        } else {
+            (
+                "hash",
+                format!(r#"read_toml(path=vars.chrono_selection)["{command}"][{index}]"#),
+                "checksum",
+            )
+        };
+        let action = |present, matches| match installed_value(present, matches) {
+            InstalledValue::Pin if is_version => String::new(),
+            InstalledValue::Pin => r#"{{ PLATFORM["checksum"] }}"#.to_owned(),
+            InstalledValue::Use => format!("{{{{ {value} }}}}"),
+            InstalledValue::Reject => {
+                format!(r#"{{{{ throw(message="Invalid installed release {field}") }}}}"#)
+            }
+        };
+        let assign = format!("{{% set {value} = {lookup} %}}");
+        let pattern = installed_pattern(is_version);
+        let check = format!(r#"{{% if {value} is matching(pat="{pattern}") %}}"#);
+        let yes = action(true, true);
+        let no = action(true, false);
+        let fallback = action(false, false);
+        let end = "{% endif %}";
+        let otherwise = "{% else %}";
+        let inner = format!("{assign}{check}{yes}{otherwise}{no}{end}");
+        if is_version {
+            let file = "{% if vars.chrono_selection is exists %}{% set data = read_toml(path=vars.chrono_selection) %}{% endif %}";
+            let has = format!(r#"{{% if data is defined and "{command}" in data %}}"#);
+            format!("{file}{has}{inner}{end}{fallback}")
+        } else {
+            when_selected("SELECTED", &inner, &fallback)
+        }
+    }
+
     #[test]
     fn installed_assets_use_the_verified_platforms() {
         let document: toml::Value = toml::from_str(selected_mise_manifest()).unwrap();
+        assert_eq!(
+            document["vars"]["chrono_selection"].as_str(),
+            Some("{{ config_root }}/.chrono-harness/state/tool-selection/versions.toml")
+        );
+        assert_eq!(
+            document["vars"]["chrono_pins"].as_str(),
+            Some("{{ config_root }}/.config/mise/conf.d/chrono-harness.toml")
+        );
         let entries = document["tools"].as_table().unwrap();
         assert_eq!(entries.len(), 21);
         for (key, tool) in entries {
@@ -138,24 +208,31 @@ mod native {
                 "chrono-worktree" => "chrono-harness/chrono-harness-worktree",
                 _ => panic!("unexpected selected tool {command}"),
             };
+            let variable = format!("selected_{}", command.replace('-', "_"));
+            assert_eq!(
+                document["vars"][&variable].as_str(),
+                Some(installed_field_expression(true, command, 0).as_str())
+            );
+            let selected = format!("vars.{variable}");
+            let value = format!("{{{{ {selected} }}}}");
+            let pin_tool =
+                format!(r#"read_toml(path=vars.chrono_pins)["tools"]["http:{command}"]"#);
+            let pinned_version = format!(r#"{{{{ {pin_tool}["version"] }}}}"#);
+            let version = when_selected(&selected, &value, &pinned_version);
+            assert_eq!(tool["version"].as_str(), Some(version.as_str()));
             let platforms = tool["platforms"].as_table().unwrap();
             assert_eq!(platforms.len(), 2);
             for (name, linux) in [("linux-x64", true), ("macos-arm64", false)] {
                 let (suffix, index) = installed_asset(linux);
-                let selected = format!("vars.selected_{}", command.replace('-', "_"));
-                let pin = format!(
-                    r#"read_toml(path=vars.chrono_pins)["tools"]["http:{command}"]["platforms"]["{name}"]"#
+                let pin = format!(r#"{pin_tool}["platforms"]["{name}"]"#);
+                let asset = format!(
+                    "https://github.com/{repository}/releases/download/v{value}/{command}-{suffix}"
                 );
-                let url = r#"{% if SELECTED %}https://github.com/REPOSITORY/releases/download/v{{ SELECTED }}/ASSET{% else %}{{ PLATFORM["url"] }}{% endif %}"#
+                let pinned_url = format!(r#"{{{{ {pin}["url"] }}}}"#);
+                let url = when_selected(&selected, &asset, &pinned_url);
+                let checksum = installed_field_expression(false, command, index)
                     .replace("SELECTED", &selected)
-                    .replace("PLATFORM", &pin)
-                    .replace("REPOSITORY", repository)
-                    .replace("ASSET", &format!("{command}-{suffix}"));
-                let checksum = r#"{% if SELECTED %}{% set hash = read_toml(path=vars.chrono_selection)["COMMAND"][INDEX] %}{% if hash is matching(pat="^sha256:[a-f0-9]{64}$") %}{{ hash }}{% else %}{{ throw(message="Invalid installed release checksum") }}{% endif %}{% else %}{{ PLATFORM["checksum"] }}{% endif %}"#
-                    .replace("SELECTED", &selected)
-                    .replace("PLATFORM", &pin)
-                    .replace("COMMAND", command)
-                    .replace("INDEX", &index.to_string());
+                    .replace("PLATFORM", &pin);
                 assert_eq!(platforms[name]["url"].as_str(), Some(url.as_str()));
                 assert_eq!(
                     platforms[name]["checksum"].as_str(),
