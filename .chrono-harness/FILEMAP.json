@@ -671,7 +671,20 @@
           "kind": "test-execution",
           "to": "test:diagnostics-tests"
         }
-      ]
+      ],
+      "verification": {
+        "role": "program",
+        "roots": [
+          {
+            "path": "crates/diagnostics/src/verified_error.rs",
+            "operation": "verify.diagnostics-error"
+          },
+          {
+            "path": "crates/diagnostics-tests/tests/verified_error.rs",
+            "operation": "verify.diagnostics-error-tests"
+          }
+        ]
+      }
     },
     {
       "path": "crates/diagnostics/src/lib.rs",

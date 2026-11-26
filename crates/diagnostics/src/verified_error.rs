@@ -4,6 +4,14 @@ use crate::verus;
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 
+#[cfg(verus_keep_ghost)]
+#[path = "error.rs"]
+mod io_adapter;
+#[cfg(verus_keep_ghost)]
+pub use self::io_adapter::cause;
+#[cfg(not(verus_keep_ghost))]
+pub use crate::error::cause;
+
 verus! {
 
 /// 实际错误节点；上下文保持调用方的完整类型，不在证明中替换为摘要。
