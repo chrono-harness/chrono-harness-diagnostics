@@ -431,16 +431,22 @@ fn cli_session(
         }
         Ok(exit)
     });
-    if let Err(errors) = logger.finish() {
-        let mut failure = Failure::new("E_RUNTIME_LOG", "runtime log publication failed");
-        match exit {
-            Ok(code) => failure = failure.at("operation_exit_code", u64::from(code)),
-            Err(source) => failure = failure.with_related("protocol", source),
-        }
-        for error in errors {
-            failure = failure.with_related("logging", error);
-        }
-        return failed(failure);
-    }
-    exit.unwrap_or_else(failed)
+    verified_runtime::session_exit(exit, logger.finish(), |outcome| {
+        let failure = match outcome {
+            verified_runtime::SessionFailure::Protocol(error) => error,
+            verified_runtime::SessionFailure::Finish { operation, errors } => {
+                let failure = Failure::new("E_RUNTIME_LOG", "runtime log publication failed");
+                let cause = match operation {
+                    Ok(code) => failure.at("operation_exit_code", u64::from(code)),
+                    Err(source) => failure.with_related("protocol", source),
+                };
+                let mut failure = cause;
+                for error in errors {
+                    failure = failure.with_related("logging", error);
+                }
+                failure
+            }
+        };
+        emergency(producer, &failure);
+    })
 }

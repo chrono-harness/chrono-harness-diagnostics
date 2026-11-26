@@ -21,6 +21,43 @@ pub mod cli;
 pub mod trace_events;
 
 verus! {
+/// Logging failures keep the original operation outcome and every finish error in order.
+pub enum SessionFailure<P, L> {
+    Protocol(P),
+    Finish { operation: Result<u8, P>, errors: Vec<L> },
+}
+
+pub(crate) fn session_exit<P, L, F>(
+    operation: Result<u8, P>, finish: Result<(), Vec<L>>, emergency: F,
+) -> (status: u8)
+    where F: FnOnce(SessionFailure<P, L>),
+    requires match finish {
+        Ok(()) => match operation {
+            Ok(_) => true,
+            Err(e) => emergency.requires((SessionFailure::Protocol(e),)),
+        },
+        Err(errors) => emergency.requires((SessionFailure::Finish { operation, errors },)),
+    },
+    ensures match finish {
+        Ok(()) => match operation {
+            Ok(code) => status == code,
+            Err(e) => status == 2 && emergency.ensures((SessionFailure::Protocol(e),), ()),
+        },
+        Err(errors) => status == 2
+            && emergency.ensures((SessionFailure::Finish { operation, errors },), ()),
+    },
+{
+    let failure = match finish {
+        Ok(()) => match operation {
+            Ok(code) => return code,
+            Err(error) => SessionFailure::Protocol(error),
+        },
+        Err(errors) => SessionFailure::Finish { operation, errors },
+    };
+    emergency(failure);
+    2
+}
+
 
 pub open spec fn sequence_result<S, E, W, F>(
     initial: S, write: W, flush: F, out: (S, Result<(), E>),

@@ -11,6 +11,30 @@ use vstd::prelude::*;
 use vstd::vpanic as panic;
 
 verus! {
+#[cfg(verus_keep_ghost)]
+fn cli_exit_preserves_both_outcomes(operation: Result<u8, u64>, errors: Option<Vec<u64>>) {
+    use policy::SessionFailure;
+    let ghost original = errors;
+    let finish = match errors { Some(list) => Err(list), None => Ok(()) };
+    let status = policy::session_exit(operation, finish, |seen: SessionFailure<u64, u64>|
+        requires match original {
+            None => match operation {
+                Err(source) => seen == SessionFailure::<u64,u64>::Protocol(source),
+                Ok(_) => false,
+            },
+            Some(list) => match seen {
+                SessionFailure::Finish { operation: result, errors: retained } =>
+                    result == operation && retained@ == list@,
+                _ => false,
+            },
+        },
+    {});
+    proof { match (operation, original) {
+        (Ok(code), None) => assert(status == code),
+        _ => assert(status == 2),
+    } }
+}
+
 
 struct Sink {
     fail_write: bool,
