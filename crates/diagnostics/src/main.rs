@@ -70,7 +70,7 @@ fn main() -> ExitCode {
         [command, root] if command == "expire-logs-v1" => {
             match runtime::maintain(Path::new(root)) {
                 Ok(result) => {
-                    let status = u8::from(result.as_ref().is_some_and(|r| !r.errors.is_empty()));
+                    let status = chrono_diagnostics::verified_runtime::expiry_exit(result.as_ref());
                     serde_json::to_writer(&mut stdout, &result)
                         .map_err(io::Error::other)
                         .and_then(|()| writeln!(stdout))
