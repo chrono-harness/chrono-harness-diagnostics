@@ -183,13 +183,7 @@ struct Generation {
 }
 
 #[cfg(not(verus_keep_ghost))]
-#[derive(Default, Serialize)]
-pub struct ExpiredLogs {
-    pub removed: usize,
-    pub legacy: usize,
-    pub busy: bool,
-    pub errors: Vec<String>,
-}
+pub use crate::verified_runtime::ExpiredLogs;
 
 #[cfg(not(verus_keep_ghost))]
 fn invalid(message: &str) -> io::Error {

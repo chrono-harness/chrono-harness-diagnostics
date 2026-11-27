@@ -129,6 +129,22 @@ fn expect(condition: bool)
     if !condition { panic!(); }
 }
 
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn expiry_status_retains_errors_after_partial_cleanup() {
+    expect(policy::expiry_exit(None) == 0);
+    let mut report = policy::ExpiredLogs {
+        removed: 0, legacy: 0, busy: false, errors: Vec::new(),
+    };
+    expect(policy::expiry_exit(Some(&report)) == 0);
+    report.removed = 1;
+    expect(policy::expiry_exit(Some(&report)) == 0);
+    report.errors.push(String::new());
+    expect(policy::expiry_exit(Some(&report)) == 1);
+    report.removed = 0;
+    report.errors.push(String::new());
+    expect(policy::expiry_exit(Some(&report)) == 1);
+}
+
 fn fresh(fail_write: bool, fail_flush: bool, code: u64) -> (sink: Sink)
     ensures sink.fail_write == fail_write, sink.fail_flush == fail_flush,
         sink.code == code, sink.trace@ == Seq::<u8>::empty(),

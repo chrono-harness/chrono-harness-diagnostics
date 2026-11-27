@@ -21,6 +21,27 @@ pub mod cli;
 pub mod trace_events;
 
 verus! {
+#[cfg_attr(not(verus_keep_ghost), derive(Default, serde::Serialize))]
+pub struct ExpiredLogs {
+    pub removed: usize,
+    pub legacy: usize,
+    pub busy: bool,
+    pub errors: Vec<String>,
+}
+
+/// A cleanup can remove expired logs and still encounter errors in other files.
+pub fn expiry_exit(report: Option<&ExpiredLogs>) -> (status: u8)
+    ensures status == match report {
+        None => 0u8,
+        Some(logs) => if logs.errors.len() == 0 { 0u8 } else { 1u8 },
+    },
+{
+    match report {
+        Some(logs) if !logs.errors.is_empty() => 1,
+        _ => 0,
+    }
+}
+
 /// Logging failures keep the original operation outcome and every finish error in order.
 pub enum SessionFailure<P, L> {
     Protocol(P),
