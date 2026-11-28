@@ -675,8 +675,30 @@ fn explicit_library_sink_survives_file_adoption_and_dual_failure_keeps_both_caus
         }
     }
     let fixture = Fixture::new();
-    fixture.policy(4096, 2, "info");
     let captured = Captured(Arc::new(Mutex::new(Vec::new())));
+    let logger = runtime::logger(
+        &fixture.0,
+        "fixture",
+        tracing::Level::WARN,
+        captured.clone(),
+    )
+    .unwrap();
+    logger.run(|| {
+        tracing::info!(event_id = "below.default.level", "filtered");
+        tracing::warn!(event_id = "original.sink", "retained evidence");
+    });
+    logger.finish().unwrap();
+    let bytes = std::mem::take(&mut *captured.0.lock().unwrap());
+    let original: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(original["event"], "original.sink");
+    assert!(!fixture.0.join(".chrono-harness/state/logs").exists());
+    assert!(
+        runtime::maintain_at(&fixture.0, u64::MAX)
+            .unwrap()
+            .is_none()
+    );
+
+    fixture.policy(4096, 2, "info");
     let logger = runtime::logger(
         &fixture.0,
         "fixture",
@@ -744,6 +766,35 @@ fn malformed_and_escaping_policy_is_rejected_before_creating_logs() {
     fs::write(&path, b"{\"schema\":").unwrap();
     assert!(runtime::configured_logger(&fixture.0, "fixture", io::sink()).is_err());
     assert!(!fixture.0.join(".chrono-harness/state/logs").exists());
+
+    fixture.policy(4096, 2, "info");
+    let existing = fixture.0.join(".chrono-harness/state/logs");
+    fs::create_dir_all(&existing).unwrap();
+    let original = existing.join("runtime.3.jsonl");
+    fs::write(&original, b"preserve bytes").unwrap();
+    let mut bytes = fs::read(&path).unwrap();
+    bytes.resize(16_384, b' ');
+    fs::write(&path, &bytes).unwrap();
+    assert!(
+        runtime::maintain_at(&fixture.0, u64::MAX)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(fs::read(&original).unwrap(), b"preserve bytes");
+    bytes.push(b' ');
+    fs::write(&path, &bytes).unwrap();
+    let error = runtime::configured_logger(&fixture.0, "fixture", io::sink())
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("exceeds 16384 bytes"));
+    assert_eq!(fs::read(&original).unwrap(), b"preserve bytes");
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
+    let error = runtime::configured_logger(&fixture.0, "fixture", io::sink())
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("must be a regular file"));
+    assert_eq!(fs::read(&original).unwrap(), b"preserve bytes");
 }
 
 #[cfg(not(verus_keep_ghost))]

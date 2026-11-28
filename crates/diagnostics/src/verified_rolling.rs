@@ -1,5 +1,7 @@
 //! 日志容量、成员结果及采用和轮转顺序的同源定义。
 #[cfg(not(verus_keep_ghost))]
+use crate::rolling as owner;
+#[cfg(not(verus_keep_ghost))]
 use crate::verus;
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
@@ -11,6 +13,105 @@ pub mod owner;
 verus! {
 
 pub const MAX_FILES: usize = 64;
+
+pub fn visit_directory<E, C>(present: Result<bool, E>, create: bool, create_one: C)
+    -> (out: Result<bool, E>)
+    where C: FnOnce() -> Result<(), E>,
+    requires create_one.requires(()),
+    ensures match present {
+        Err(error) => out == Err::<bool, E>(error),
+        Ok(true) => out == Ok::<bool, E>(true),
+        Ok(false) => if create {
+            match out {
+                Ok(found) => found && create_one.ensures((), Ok::<(), E>(())),
+                Err(error) => create_one.ensures((), Err::<(), E>(error)),
+            }
+        } else { out == Ok::<bool, E>(false) },
+    },
+{
+    match present {
+        Err(error) => Err(error),
+        Ok(true) => Ok(true),
+        Ok(false) => {
+            if !create { return Ok(false); }
+            let created = create_one();
+            match created {
+                Ok(success) => {
+                    assert(success == ());
+                    Ok(true)
+                },
+                Err(error) => Err(error),
+            }
+        },
+    }
+}
+
+/// An AlreadyExists race is accepted only if the fresh metadata still describes a directory.
+pub fn finish_directory_create<E, A, M>(
+    created: Result<(), E>, already_exists: A, metadata_is_directory: M,
+) -> (out: Result<(), E>)
+    where A: FnOnce(&E) -> bool, M: FnOnce() -> Result<bool, E>,
+    requires (forall|error: &E| already_exists.requires((error,))),
+        metadata_is_directory.requires(()),
+    ensures match created {
+        Ok(()) => out == Ok::<(), E>(()),
+        Err(error) => (already_exists.ensures((&error,), false) && out == Err::<(), E>(error))
+            || (already_exists.ensures((&error,), true) && match out {
+                Ok(()) => metadata_is_directory.ensures((), Ok::<bool, E>(true)),
+                Err(observed) => (observed == error
+                    && metadata_is_directory.ensures((), Ok::<bool, E>(false)))
+                    || metadata_is_directory.ensures((), Err::<bool, E>(observed)),
+            }),
+    },
+{
+    match created {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if !already_exists(&error) {
+                return Err(error);
+            }
+            match metadata_is_directory() {
+                Ok(true) => Ok(()),
+                Ok(false) => Err(error),
+                Err(recheck) => Err(recheck),
+            }
+        },
+    }
+}
+
+#[derive(PartialEq, Eq)]
+pub enum HeaderKind { Legacy, Incomplete, Decode }
+
+pub fn generation_header_kind(header: &[u8], generation_prefix: &[u8])
+    -> (kind: HeaderKind)
+    ensures kind == (
+        if generation_prefix.len() > header.len()
+            || exists|i: int| 0 <= i < generation_prefix.len() && generation_prefix[i] != header[i]
+        { HeaderKind::Legacy }
+        else if header.len() == 0 || header[header.len() - 1] != 10u8 { HeaderKind::Incomplete }
+        else { HeaderKind::Decode }
+    ),
+{
+    if !owner::staged_header_matches(generation_prefix, header) {
+        HeaderKind::Legacy
+    } else if header.len() == 0 || header[header.len() - 1] != 10u8 {
+        HeaderKind::Incomplete
+    } else {
+        HeaderKind::Decode
+    }
+}
+
+/// Subtract the header before comparing the record, without adding two u64 lengths.
+pub fn generation_record_fits(record: u64, header: u64, limit: u64) -> (fits: bool)
+    requires record > 0,
+    ensures fits == (record as int + header as int <= limit as int),
+{
+    if header > limit {
+        false
+    } else {
+        record_fits(record, limit - header)
+    }
+}
 
 pub fn valid_bounds(max_bytes: u64, max_files: usize) -> (valid: bool)
     ensures valid == (max_bytes > 0 && 1 <= max_files && max_files <= MAX_FILES),

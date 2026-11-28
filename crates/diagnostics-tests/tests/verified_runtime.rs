@@ -8,6 +8,8 @@ use chrono_diagnostics::{verified_runtime as policy, verus};
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
+use vstd::string::{StringSliceAdditionalSpecFns, is_ascii_spec_bytes};
+#[cfg(verus_keep_ghost)]
 use vstd::vpanic as panic;
 
 verus! {
@@ -127,6 +129,78 @@ fn expect(condition: bool)
     requires condition,
 {
     if !condition { panic!(); }
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn policy_admission_preserves_size_fields_and_level_boundaries() {
+    proof {
+        reveal_strlit(".chrono-harness/logs/");
+        is_ascii_spec_bytes(".chrono-harness/logs/");
+        assert(".chrono-harness/logs/".spec_bytes().last() == 47u8);
+        reveal_strlit("trace"); reveal_strlit("debug"); reveal_strlit("info");
+        reveal_strlit("warn"); reveal_strlit("error"); reveal_strlit("WARN");
+        reveal_strlit("chrono-runtime-logging/v1"); reveal_strlit("chrono-runtime-logging/v2");
+        is_ascii_spec_bytes("trace"); is_ascii_spec_bytes("debug"); is_ascii_spec_bytes("info");
+        is_ascii_spec_bytes("warn"); is_ascii_spec_bytes("error"); is_ascii_spec_bytes("WARN");
+        is_ascii_spec_bytes("chrono-runtime-logging/v1");
+        is_ascii_spec_bytes("chrono-runtime-logging/v2");
+        assert("trace".spec_bytes()[0] == 116u8);
+        assert("debug".spec_bytes()[0] == 100u8);
+        assert("info".spec_bytes()[0] == 105u8);
+        assert("warn".spec_bytes()[0] == 119u8);
+        assert("error".spec_bytes()[0] == 101u8);
+        assert("WARN".spec_bytes()[0] == 87u8);
+        assert("chrono-runtime-logging/v1".spec_bytes()[24] == 49u8);
+        assert("chrono-runtime-logging/v2".spec_bytes()[24] == 50u8);
+    }
+    expect(policy::policy_size_allowed(16_384));
+    expect(!policy::policy_size_allowed(16_385));
+    expect(!policy::policy_size_allowed(usize::MAX));
+    use policy::LogLevel;
+    expect(matches!(policy::policy_level("trace"), Some(LogLevel::Trace)));
+    expect(matches!(policy::policy_level("debug"), Some(LogLevel::Debug)));
+    expect(matches!(policy::policy_level("info"), Some(LogLevel::Info)));
+    expect(matches!(policy::policy_level("warn"), Some(LogLevel::Warn)));
+    expect(matches!(policy::policy_level("error"), Some(LogLevel::Error)));
+    expect(policy::policy_level("WARN").is_none());
+    let schema = "chrono-runtime-logging/v1";
+    let dedicated = ".chrono-harness/logs/";
+    expect(policy::policy_directory_allowed(dedicated, 2, true, true));
+    expect(!policy::policy_directory_allowed(dedicated, 2, false, true));
+    expect(!policy::policy_directory_allowed(dedicated, 2, true, false));
+    expect(policy::policy_fields_allowed(schema, true, true, 32, 32, None));
+    expect(policy::policy_fields_allowed(schema, true, true, 32, 32, Some(1)));
+    expect(!policy::policy_fields_allowed(schema, false, true, 32, 32, None));
+    expect(!policy::policy_fields_allowed(schema, true, false, 32, 32, None));
+    expect(!policy::policy_fields_allowed(schema, true, true, 33, 32, None));
+    expect(!policy::policy_fields_allowed(schema, true, true, 32, 32, Some(0)));
+    expect(!policy::policy_fields_allowed("chrono-runtime-logging/v2",
+        true, true, 32, 32, None));
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn missing_and_rejected_policy_preserve_the_original_sink_and_error() {
+    let adopt = |policy: u8, sink: u8| -> (out: Result<(u8, u8), u8>)
+        requires policy == 5, ensures out == Ok::<(u8, u8), u8>((policy, sink)),
+    { Ok((policy, sink)) };
+    let default = |sink: u8| -> (out: Result<(u8, u8), u8>)
+        requires sink != 2, ensures out == Ok::<(u8, u8), u8>((0, sink)),
+    { Ok((0, sink)) };
+    let absent = policy::use_policy(Ok(None), 3, adopt, default);
+    let rejected = policy::use_policy(Err(7), 2, adopt, default);
+    let adopted = policy::use_policy(Ok(Some(5)), 2, adopt, default);
+    match absent { Ok((level, sink)) => expect(level == 0 && sink == 3), _ => expect(false) }
+    match rejected { Err(error) => expect(error == 7), _ => expect(false) }
+    match adopted { Ok((level, sink)) => expect(level == 5 && sink == 2), _ => expect(false) }
+    expect(!policy::mirror_enabled(false, false));
+    expect(policy::mirror_enabled(false, true));
+    expect(policy::mirror_enabled(true, false));
+    expect(policy::maintenance_policy::<u8>(None).is_none());
+    expect(policy::maintenance_policy(Some((7u8, None))).is_none());
+    match policy::maintenance_policy(Some((7u8, Some(2)))) {
+        Some((value, window)) => expect(value == 7 && window == 2),
+        None => expect(false),
+    }
 }
 
 fn sweep_guard(guard: usize) -> (report: policy::ExpiredLogs)
