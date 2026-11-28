@@ -27,6 +27,105 @@ fn a_log_generation_expires_at_its_original_deadline() {
     expect_generation(owner::generation_deadline(u64::MAX - 1, 1) == Some(u64::MAX));
 }
 
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn legacy_expiry_observes_the_window_and_bounded_length() {
+    let fail = || -> (r: Result<bool, u8>) ensures r == Err::<bool, u8>(7), { Err(7) };
+    let complete = || -> (r: Result<bool, u8>) ensures r == Ok::<bool, u8>(true), { Ok(true) };
+    let cap = 64u64 * 1024 * 1024;
+    expect_generation(matches!(owner::legacy_expiry(100, 99, 1, fail), Ok(false)));
+    expect_generation(matches!(owner::legacy_expiry(100, 100, 0, fail), Ok(false)));
+    expect_generation(matches!(owner::legacy_expiry(100, 101, cap + 1, fail), Ok(false)));
+    expect_generation(matches!(owner::legacy_expiry(100, 100, cap, complete), Ok(true)));
+    expect_generation(matches!(owner::legacy_expiry(100, 101, 1, fail), Err(7)));
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn legacy_rows_require_a_newline_and_a_decoded_record() {
+    use owner::LegacyRead::{End, Invalid, Record};
+    let accepts = |_row: &[u8]| -> (r: bool) ensures r, { true };
+    let rejects = |_row: &[u8]| -> (r: bool) ensures !r, { false };
+    let limit = || -> (n: u64) ensures n == 3, { 3 };
+    expect_generation(matches!(owner::legacy_row(&[], accepts, limit), End(3)));
+    expect_generation(matches!(owner::legacy_row(&[65], accepts, limit), Invalid));
+    expect_generation(matches!(owner::legacy_row(&[65, 10], rejects, limit), Invalid));
+    expect_generation(matches!(owner::legacy_row(&[65, 10], accepts, limit), Record(2)));
+}
+
+proof fn observed_legacy_step<F: Fn(u8) -> (u8, Result<owner::LegacyRead, u8>)>(
+    read: F, state: u8, next: u8, row: Result<owner::LegacyRead, u8>, left: u64,
+    out: Result<bool, u8>,
+)
+    requires owner::legacy_result(state, left, read, out),
+        forall|s: (u8, Result<owner::LegacyRead, u8>)| #[trigger] read.ensures((state,), s)
+            ==> s == (next, row),
+    ensures match row {
+        Err(e) => out == Err::<bool, u8>(e),
+        Ok(owner::LegacyRead::End(n)) => out == Ok::<bool, u8>(left == 0 && n == 0),
+        Ok(owner::LegacyRead::Invalid) => out == Ok::<bool, u8>(false),
+        Ok(owner::LegacyRead::Record(n)) => if 0 < n <= left {
+            owner::legacy_result(next, (left - n) as u64, read, out)
+        } else { out == Ok::<bool, u8>(false) },
+    },
+{
+    let s = choose|s: (u8, Result<owner::LegacyRead, u8>)| #[trigger] read.ensures((state,), s)
+        && match s.1 {
+            Err(e) => out == Err::<bool, u8>(e),
+            Ok(owner::LegacyRead::End(n)) => out == Ok::<bool, u8>(left == 0 && n == 0),
+            Ok(owner::LegacyRead::Invalid) => out == Ok::<bool, u8>(false),
+            Ok(owner::LegacyRead::Record(n)) => if 0 < n <= left {
+                owner::legacy_result(s.0, (left - n) as u64, read, out)
+            } else { out == Ok::<bool, u8>(false) },
+        };
+    assert(s == (next, row));
+}
+
+// The first read delivers two bytes. The second observation may accept another
+// record, reject it, end early or fail. The third must be EOF for success.
+fn two_legacy_rows(second: Result<owner::LegacyRead, u8>, limit: u64, length: u64)
+    -> (r: Result<bool, u8>)
+    requires length >= 2,
+    ensures r == match second {
+        Err(e) => Err(e),
+        Ok(owner::LegacyRead::Invalid) => Ok(false),
+        Ok(owner::LegacyRead::End(n)) => Ok(length == 2 && n == 0),
+        Ok(owner::LegacyRead::Record(n)) => Ok(n > 0 && 2 + n as int == length && limit == 0),
+    },
+{
+    use owner::LegacyRead::{End, Record};
+    let read = |index: u8| -> (r: (u8, Result<owner::LegacyRead, u8>))
+        ensures r == if index == 0 { (1u8, Ok(Record(2))) }
+            else if index == 1 { (2u8, second) } else { (3u8, Ok(End(limit))) },
+    {
+        if index == 0 { (1, Ok(Record(2))) }
+        else if index == 1 { (2, second) } else { (3, Ok(End(limit))) }
+    };
+    let r = owner::scan_legacy_rows(0, length, read);
+    proof {
+        observed_legacy_step(read, 0, 1, Ok(Record(2)), length, r);
+        observed_legacy_step(read, 1, 2, second, (length - 2) as u64, r);
+        if let Ok(Record(n)) = second {
+            if 0 < n <= length - 2 {
+                observed_legacy_step(read, 2, 3, Ok(End(limit)), (length - 2 - n) as u64, r);
+            }
+        }
+    }
+    r
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn legacy_scan_retains_the_first_failure_and_requires_exact_eof() {
+    use owner::LegacyRead::{End, Invalid, Record};
+    expect_generation(matches!(two_legacy_rows(Ok(Record(3)), 0, 5), Ok(true)));
+    expect_generation(matches!(two_legacy_rows(Ok(Record(3)), 1, 5), Ok(false)));
+    expect_generation(matches!(two_legacy_rows(Ok(Record(3)), 0, 4), Ok(false)));
+    expect_generation(matches!(two_legacy_rows(Ok(Record(3)), 0, 6), Ok(false)));
+    expect_generation(matches!(two_legacy_rows(Ok(Record(0)), 0, 2), Ok(false)));
+    expect_generation(matches!(two_legacy_rows(Ok(End(0)), 0, 2), Ok(true)));
+    expect_generation(matches!(two_legacy_rows(Ok(End(1)), 0, 2), Ok(false)));
+    expect_generation(matches!(two_legacy_rows(Ok(Invalid), 0, 4), Ok(false)));
+    expect_generation(matches!(two_legacy_rows(Err(9), 0, 4), Err(9)));
+}
+
 /// Require the same result for every completed observation, including an
 /// original timestamp error that lower-priority mismatches must not hide.
 fn recheck_case(regular: bool, current: u64, opened: u64, modified: Result<bool, u8>,
@@ -96,6 +195,48 @@ fn only_writer_prefixes_can_be_removed() {
     expect_generation(!owner::staged_header_matches(&[123u8, 125u8, 10u8, 0u8], &header));
 }
 
+}
+
+#[cfg(not(verus_keep_ghost))]
+#[test]
+fn legacy_inspection_stops_before_unneeded_io_and_decoding() {
+    use owner::LegacyRead::{End, Invalid, Record};
+    use std::cell::Cell;
+
+    for (observed, length) in [(9, 1), (10, 0), (10, 64 * 1024 * 1024 + 1)] {
+        assert_eq!(
+            owner::legacy_expiry::<u8, _>(10, observed, length, || panic!("unexpected rewind")),
+            Ok(false)
+        );
+    }
+    assert!(matches!(
+        owner::legacy_row(
+            b"{}",
+            |_| panic!("unexpected decode"),
+            || panic!("unexpected EOF")
+        ),
+        Invalid
+    ));
+    for (second, expected, count) in [
+        (Ok(Invalid), Ok(false), 2),
+        (Err(9u8), Err(9), 2),
+        (Ok(End(1)), Ok(false), 2),
+        (Ok(Record(2)), Ok(true), 3),
+    ] {
+        let reads = Cell::new(0);
+        let result = owner::scan_legacy_rows((), 4, |()| {
+            reads.set(reads.get() + 1);
+            let row = match reads.get() {
+                1 => Ok(Record(2)),
+                2 => second,
+                3 => Ok(End(0)),
+                _ => panic!("unexpected read after EOF"),
+            };
+            ((), row)
+        });
+        assert_eq!(result, expected);
+        assert_eq!(reads.get(), count);
+    }
 }
 
 #[cfg(not(verus_keep_ghost))]

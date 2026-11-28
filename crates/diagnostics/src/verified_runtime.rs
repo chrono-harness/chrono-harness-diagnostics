@@ -29,6 +29,31 @@ pub struct ExpiredLogs {
     pub errors: Vec<String>,
 }
 
+/// The platform supplies the acquired guard, a busy observation, or its original error.
+pub fn with_expiry_lock<L, E, F>(acquired: Result<Option<L>, E>, sweep: F)
+    -> (out: Result<ExpiredLogs, E>)
+    where F: FnOnce(L) -> ExpiredLogs,
+    requires match acquired { Ok(Some(guard)) => sweep.requires((guard,)), _ => true },
+    ensures match acquired {
+        Err(error) => out == Err::<ExpiredLogs, E>(error),
+        Ok(None) => match out {
+            Ok(report) => report.busy && report.removed == 0
+                && report.legacy == 0 && report.errors.len() == 0,
+            Err(_) => false,
+        },
+        Ok(Some(guard)) => match out {
+            Ok(report) => sweep.ensures((guard,), report),
+            Err(_) => false,
+        },
+    },
+{
+    match acquired {
+        Ok(Some(guard)) => Ok(sweep(guard)),
+        Ok(None) => Ok(ExpiredLogs { removed: 0, legacy: 0, busy: true, errors: Vec::new() }),
+        Err(error) => Err(error),
+    }
+}
+
 /// A cleanup can remove expired logs and still encounter errors in other files.
 pub fn expiry_exit(report: Option<&ExpiredLogs>) -> (status: u8)
     ensures status == match report {
