@@ -129,6 +129,28 @@ fn expect(condition: bool)
     if !condition { panic!(); }
 }
 
+fn sweep_guard(guard: usize) -> (report: policy::ExpiredLogs)
+    ensures report.removed == guard, report.legacy == 3, !report.busy, report.errors.len() == 0,
+{
+    policy::ExpiredLogs { removed: guard, legacy: 3, busy: false, errors: Vec::new() }
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn expiration_waits_for_the_writer_to_release_the_log_family() {
+    let busy = policy::with_expiry_lock(Ok::<_, u8>(None), sweep_guard);
+    match busy {
+        Ok(logs) => expect(logs.busy && logs.removed == 0 && logs.legacy == 0 && logs.errors.is_empty()),
+        Err(_) => expect(false),
+    }
+    let failed = policy::with_expiry_lock(Err::<Option<usize>, _>(7u8), sweep_guard);
+    match failed { Err(code) => expect(code == 7), Ok(_) => expect(false) }
+    let acquired = policy::with_expiry_lock(Ok::<_, u8>(Some(11usize)), sweep_guard);
+    match acquired {
+        Ok(logs) => expect(!logs.busy && logs.removed == 11 && logs.legacy == 3 && logs.errors.is_empty()),
+        Err(_) => expect(false),
+    }
+}
+
 #[cfg_attr(not(verus_keep_ghost), test)]
 fn expiry_status_retains_errors_after_partial_cleanup() {
     expect(policy::expiry_exit(None) == 0);

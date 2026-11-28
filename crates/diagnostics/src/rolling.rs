@@ -517,33 +517,33 @@ impl RollingFile {
         observed: u64,
         keep_seconds: u64,
     ) -> io::Result<ExpiredLogs> {
-        let mut result = ExpiredLogs::default();
         if !Self::check_directory(directory, false)? {
-            return Ok(result);
+            return Ok(ExpiredLogs::default());
         }
         let lock_path = directory.join("runtime.lock");
         if !regular(&lock_path)? {
             return Err(invalid("log family has no adopted writer lock"));
         }
         let lock = OpenOptions::new().write(true).open(lock_path)?;
-        match lock.try_lock() {
-            Ok(()) => (),
-            Err(fs::TryLockError::WouldBlock) => {
-                result.busy = true;
-                return Ok(result);
+        let acquired = match lock.try_lock() {
+            Ok(()) => Ok(Some(lock)),
+            Err(fs::TryLockError::WouldBlock) => Ok(None),
+            Err(fs::TryLockError::Error(error)) => Err(error),
+        };
+        crate::verified_runtime::with_expiry_lock(acquired, |_guard| {
+            let mut result = ExpiredLogs::default();
+            if let Err(error) = Self::clear_pending(directory) {
+                result.errors.push(format!("runtime.pending: {error}"));
             }
-            Err(fs::TryLockError::Error(error)) => return Err(error),
-        }
-        if let Err(error) = Self::clear_pending(directory) {
-            result.errors.push(format!("runtime.pending: {error}"));
-        }
-        for index in 0..MAX_FILES {
-            let path = Self::member(directory, index);
-            if let Err(error) = Self::expire_member(&path, observed, keep_seconds, &mut result) {
-                result.errors.push(format!("{}: {error}", path.display()));
+            for index in 0..MAX_FILES {
+                let path = Self::member(directory, index);
+                if let Err(error) = Self::expire_member(&path, observed, keep_seconds, &mut result)
+                {
+                    result.errors.push(format!("{}: {error}", path.display()));
+                }
             }
-        }
-        Ok(result)
+            result
+        })
     }
 
     fn expire_member(
