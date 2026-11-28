@@ -1,6 +1,6 @@
 [package]
 name = "chrono-diagnostics"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 publish = false
 description = "Shared structured diagnostics and explicit error records"
