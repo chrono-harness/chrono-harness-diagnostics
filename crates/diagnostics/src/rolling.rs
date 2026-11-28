@@ -26,6 +26,100 @@ pub fn generation_expired(deadline: u64, observed: u64) -> (expired: bool)
     observed >= deadline
 }
 
+pub const MAX_RUNTIME_LOG_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Rewinding and reading the opened file are only necessary after both gates.
+pub fn legacy_expiry<E, F>(deadline: u64, observed: u64, length: u64, inspect: F)
+    -> (out: Result<bool, E>)
+    where F: FnOnce() -> Result<bool, E>,
+    requires inspect.requires(()),
+    ensures if observed < deadline || length == 0 || length > MAX_RUNTIME_LOG_BYTES {
+        out == Ok::<bool, E>(false)
+    } else { inspect.ensures((), out) },
+{
+    if !generation_expired(deadline, observed) || length == 0 || length > MAX_RUNTIME_LOG_BYTES {
+        Ok(false)
+    } else { inspect() }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LegacyRead { End(u64), Invalid, Record(usize) }
+
+/// read_until fills the cleared buffer. The Take limit is relevant only at EOF:
+/// a buffered reader can already have fetched bytes belonging to later rows.
+pub fn legacy_row<D, L>(row: &[u8], decode: D, limit: L) -> (out: LegacyRead)
+    where D: FnOnce(&[u8]) -> bool, L: FnOnce() -> u64,
+    requires decode.requires((row,)), limit.requires(()),
+    ensures if row.len() == 0 {
+        exists|left: u64| #[trigger] limit.ensures((), left) && out == LegacyRead::End(left)
+    } else if row[row.len() - 1] != 10u8 {
+        out == LegacyRead::Invalid
+    } else {
+        exists|valid: bool| #[trigger] decode.ensures((row,), valid)
+            && out == if valid { LegacyRead::Record(row.len() as usize) } else { LegacyRead::Invalid }
+    },
+{
+    if row.len() == 0 { LegacyRead::End(limit()) }
+    else if row[row.len() - 1] != 10u8 || !decode(row) { LegacyRead::Invalid }
+    else { LegacyRead::Record(row.len()) }
+}
+
+/// Each recursive step witnesses one actual read. Only a complete record
+/// consumes bytes; the first rejection, EOF or I/O error ends the trace.
+pub open spec fn legacy_result<S, E, F: Fn(S) -> (S, Result<LegacyRead, E>)>(
+    state: S, left: u64, read: F, out: Result<bool, E>,
+) -> bool
+    decreases left,
+{
+    exists|step: (S, Result<LegacyRead, E>)| #[trigger] read.ensures((state,), step)
+        && match step.1 {
+            Err(e) => out == Err::<bool, E>(e),
+            Ok(LegacyRead::End(limit)) => out == Ok::<bool, E>(left == 0 && limit == 0),
+            Ok(LegacyRead::Invalid) => out == Ok::<bool, E>(false),
+            Ok(LegacyRead::Record(n)) => if 0 < n <= left {
+                legacy_result(step.0, (left - n) as u64, read, out)
+            } else { out == Ok::<bool, E>(false) },
+        }
+}
+
+pub fn scan_legacy_rows<S, E, F>(initial: S, length: u64, read: F) -> (out: Result<bool, E>)
+    where F: Fn(S) -> (S, Result<LegacyRead, E>),
+    requires forall|s: S| read.requires((s,)),
+    ensures legacy_result(initial, length, read, out),
+{
+    let mut state = initial;
+    let mut left = length;
+    loop
+        invariant
+            forall|s: S| read.requires((s,)),
+            forall|out: Result<bool, E>| #[trigger] legacy_result(state, left, read, out)
+                ==> legacy_result(initial, length, read, out),
+        decreases left,
+    {
+        let ghost before = state;
+        let step = read(state);
+        let ghost witness = step;
+        let (next, row) = step;
+        let terminal = match row {
+            Err(e) => Err(e),
+            Ok(LegacyRead::End(limit)) => Ok(left == 0 && limit == 0),
+            Ok(LegacyRead::Record(n)) if n > 0 && n as u64 <= left => {
+                let after = left - n as u64;
+                assert forall|out: Result<bool, E>| #[trigger] legacy_result(next, after, read, out)
+                    implies legacy_result(before, left, read, out) by {
+                    assert(read.ensures((before,), witness));
+                }
+                left = after;
+                state = next;
+                continue;
+            },
+            _ => Ok(false),
+        };
+        assert(legacy_result(before, left, read, terminal));
+        return terminal;
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ExpirationIdentity { Same, Changed, Replaced }
 
@@ -155,9 +249,6 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(not(verus_keep_ghost))]
 pub use crate::verified_rolling::MAX_FILES;
-
-#[cfg(not(verus_keep_ghost))]
-pub(crate) const MAX_RUNTIME_LOG_BYTES: u64 = 64 * 1024 * 1024;
 
 #[cfg(not(verus_keep_ghost))]
 const GENERATION_SCHEMA: &str = "chrono-runtime-log-generation/v1";
@@ -476,9 +567,10 @@ impl RollingFile {
                     .as_secs();
                 let deadline = generation_deadline(born, keep_seconds)
                     .ok_or_else(|| invalid("legacy log deadline exceeds supported time range"))?;
-                if !generation_expired(deadline, observed)
-                    || !Self::complete_legacy_log(&file, metadata.len())?
-                {
+                let length = metadata.len();
+                if !legacy_expiry(deadline, observed, length, || {
+                    Self::complete_legacy_log(&file, length)
+                })? {
                     result.legacy += 1;
                     return Ok(());
                 }
@@ -526,23 +618,22 @@ impl RollingFile {
     fn complete_legacy_log(mut file: &File, length: u64) -> io::Result<bool> {
         use std::io::Seek;
 
-        if length == 0 || length > MAX_RUNTIME_LOG_BYTES {
-            return Ok(false);
-        }
-        // Reading the header advanced the same open file description. Bound the
-        // entire validation to the observed extent of this locked generation.
+        // The header advanced this open file description. Validate exactly the
+        // observed extent and reuse one line buffer for the entire scan.
         file.rewind()?;
-        let mut reader = BufReader::new(file.take(length));
-        let mut row = Vec::new();
-        while reader.read_until(b'\n', &mut row)? != 0 {
-            if !row.ends_with(b"\n")
-                || serde_json::from_slice::<crate::logging::LogRecord>(&row).is_err()
-            {
-                return Ok(false);
-            }
+        let mut input = (BufReader::new(file.take(length)), Vec::new());
+        scan_legacy_rows(&mut input, length, |input| {
+            let (reader, row) = &mut *input;
             row.clear();
-        }
-        Ok(reader.into_inner().limit() == 0)
+            let observed = reader.read_until(b'\n', row).map(|_| {
+                legacy_row(
+                    row,
+                    |bytes| serde_json::from_slice::<crate::logging::LogRecord>(bytes).is_ok(),
+                    || reader.get_ref().limit(),
+                )
+            });
+            (input, observed)
+        })
     }
 }
 
