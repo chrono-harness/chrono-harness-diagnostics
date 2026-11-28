@@ -57,37 +57,36 @@ pub struct Policy {
 #[cfg(not(verus_keep_ghost))]
 impl Policy {
     fn level(&self) -> Result<Level, Failure> {
-        match self.level.as_str() {
-            "trace" => Ok(Level::TRACE),
-            "debug" => Ok(Level::DEBUG),
-            "info" => Ok(Level::INFO),
-            "warn" => Ok(Level::WARN),
-            "error" => Ok(Level::ERROR),
-            _ => Err(Failure::new("E_LOG_CONFIG", "unknown runtime log level")),
+        use verified_runtime::LogLevel;
+        match verified_runtime::policy_level(&self.level) {
+            Some(LogLevel::Trace) => Ok(Level::TRACE),
+            Some(LogLevel::Debug) => Ok(Level::DEBUG),
+            Some(LogLevel::Info) => Ok(Level::INFO),
+            Some(LogLevel::Warn) => Ok(Level::WARN),
+            Some(LogLevel::Error) => Ok(Level::ERROR),
+            None => Err(Failure::new("E_LOG_CONFIG", "unknown runtime log level")),
         }
     }
 
     fn validate(&self) -> Result<(), Failure> {
         let directory = Path::new(&self.directory);
-        let dedicated = self.directory == ".chrono-harness/logs/";
-        let state_child = self.directory.starts_with(".chrono-harness/state/")
-            && directory.components().count() >= 3;
-        if self.schema != "chrono-runtime-logging/v1"
-            || !(dedicated || state_child)
-            || !self.directory.ends_with('/')
-            || !Path::new(&self.directory)
+        let allowed = verified_runtime::policy_directory_allowed(
+            &self.directory,
+            directory.components().count(),
+            directory
                 .components()
-                .all(|c| matches!(c, Component::Normal(_)))
-            || Path::new(&self.directory)
-                .components()
-                .collect::<PathBuf>()
-                .to_str()
-                != Some(self.directory.trim_end_matches('/'))
-            || self.max_bytes == 0
-            || self.max_bytes > crate::rolling::MAX_RUNTIME_LOG_BYTES
-            || !(1..=crate::rolling::MAX_FILES).contains(&self.max_files)
-            || !retention_window_valid(self.keep_seconds)
-        {
+                .all(|c| matches!(c, Component::Normal(_))),
+            directory.components().collect::<PathBuf>().to_str()
+                == Some(self.directory.trim_end_matches('/')),
+        );
+        if !verified_runtime::policy_fields_allowed(
+            &self.schema,
+            allowed,
+            crate::verified_rolling::valid_bounds(self.max_bytes, self.max_files),
+            self.max_bytes,
+            crate::rolling::MAX_RUNTIME_LOG_BYTES,
+            self.keep_seconds,
+        ) {
             return Err(Failure::new(
                 "E_LOG_CONFIG",
                 "invalid runtime logging schema, directory or finite bounds",
@@ -164,24 +163,35 @@ fn io_failure(error: io::Error) -> Failure {
 #[cfg(not(verus_keep_ghost))]
 fn load_policy(root: &Path) -> Result<Option<Policy>, Failure> {
     let config = root.join(CONFIG_PATH);
-    match fs::symlink_metadata(&config) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(io_failure(error)),
-        Ok(metadata) if metadata.is_file() => (),
-        Ok(_) => {
+    let present = crate::verified_rolling::regular_member(
+        fs::symlink_metadata(&config)
+            .map(|metadata| metadata.is_file())
+            .map_err(Some),
+        |error: &Option<io::Error>| {
+            error
+                .as_ref()
+                .is_some_and(|error| error.kind() == io::ErrorKind::NotFound)
+        },
+        || None,
+    );
+    match present {
+        Ok(false) => return Ok(None),
+        Ok(true) => (),
+        Err(None) => {
             return Err(Failure::new(
                 "E_LOG_CONFIG",
                 "runtime log policy must be a regular file",
             ));
         }
+        Err(Some(error)) => return Err(io_failure(error)),
     }
     let mut bytes = Vec::new();
     File::open(&config)
         .map_err(io_failure)?
-        .take(16385)
+        .take((verified_runtime::POLICY_LIMIT + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(io_failure)?;
-    if bytes.len() > 16384 {
+    if !verified_runtime::policy_size_allowed(bytes.len()) {
         return Err(Failure::new(
             "E_LOG_CONFIG",
             "runtime log policy exceeds 16384 bytes",
@@ -202,7 +212,12 @@ fn load_policy(root: &Path) -> Result<Option<Policy>, Failure> {
 }
 
 #[cfg(not(verus_keep_ghost))]
-fn sink<W>(root: &Path, policy: &Policy, stderr: W) -> Result<RuntimeSink<W>, Failure> {
+fn sink<W>(
+    root: &Path,
+    policy: &Policy,
+    stderr: W,
+    explicit: bool,
+) -> Result<RuntimeSink<W>, Failure> {
     let root = fs::canonicalize(root).map_err(io_failure)?;
     let file = RollingFile::open_with_window(
         &root.join(&policy.directory),
@@ -213,17 +228,18 @@ fn sink<W>(root: &Path, policy: &Policy, stderr: W) -> Result<RuntimeSink<W>, Fa
     .map_err(io_failure)?;
     Ok(RuntimeSink {
         file,
-        stderr: policy.stderr.then_some(stderr),
+        stderr: verified_runtime::mirror_enabled(policy.stderr, explicit).then_some(stderr),
     })
 }
 
 /// Retire adopted log generations even when all log writers are idle.
 #[cfg(not(verus_keep_ghost))]
 pub fn maintain_at(root: &Path, observed: u64) -> Result<Option<ExpiredLogs>, Failure> {
-    let Some(policy) = load_policy(root)? else {
-        return Ok(None);
-    };
-    let Some(keep_seconds) = policy.keep_seconds else {
+    let policy = load_policy(root)?.map(|policy| {
+        let keep_seconds = policy.keep_seconds;
+        (policy, keep_seconds)
+    });
+    let Some((policy, keep_seconds)) = verified_runtime::maintenance_policy(policy) else {
         return Ok(None);
     };
     let root = fs::canonicalize(root).map_err(io_failure)?;
@@ -243,14 +259,18 @@ pub fn configured_logger<W: Write + Send + 'static>(
     producer: &str,
     stderr: W,
 ) -> Result<Option<Logger<RuntimeSink<W>>>, Failure> {
-    let Some(policy) = load_policy(root)? else {
-        return Ok(None);
-    };
-    Ok(Some(Logger::new(
-        producer,
-        policy.level()?,
-        sink(root, &policy, stderr)?,
-    )))
+    verified_runtime::use_policy(
+        load_policy(root),
+        stderr,
+        |policy, stderr| {
+            Ok(Some(Logger::new(
+                producer,
+                policy.level()?,
+                sink(root, &policy, stderr, false)?,
+            )))
+        },
+        |_| Ok(None),
+    )
 }
 
 /// Preserve a library caller's chosen sink and level when the host has not adopted file logs.
@@ -261,22 +281,24 @@ pub fn logger<W: Write + Send + 'static>(
     default_level: Level,
     stderr: W,
 ) -> Result<Logger<Box<dyn Write + Send>>, Failure> {
-    match load_policy(root)? {
-        Some(mut policy) => {
-            // An explicitly requested evidence sink remains active; file logging mirrors it.
-            policy.stderr = true;
+    verified_runtime::use_policy(
+        load_policy(root),
+        stderr,
+        |policy, stderr| {
             Ok(Logger::new(
                 producer,
                 policy.level()?,
-                Box::new(sink(root, &policy, stderr)?) as Box<dyn Write + Send>,
+                Box::new(sink(root, &policy, stderr, true)?) as Box<dyn Write + Send>,
             ))
-        }
-        None => Ok(Logger::new(
-            producer,
-            default_level,
-            Box::new(stderr) as Box<dyn Write + Send>,
-        )),
-    }
+        },
+        |stderr| {
+            Ok(Logger::new(
+                producer,
+                default_level,
+                Box::new(stderr) as Box<dyn Write + Send>,
+            ))
+        },
+    )
 }
 
 #[cfg(not(verus_keep_ghost))]

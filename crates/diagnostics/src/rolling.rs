@@ -323,7 +323,7 @@ impl RollingFile {
                 "log bounds must be positive; max_files must be at most 64",
             ));
         }
-        if keep_seconds == Some(0) {
+        if !crate::runtime::retention_window_valid(keep_seconds) {
             return Err(invalid("log retention must be positive"));
         }
         Self::check_directory(directory, true)?;
@@ -347,32 +347,24 @@ impl RollingFile {
 
     // Walk explicit components only; never follow a directory alias during disposal.
     fn check_directory(directory: &Path, create: bool) -> io::Result<bool> {
+        use crate::verified_rolling::{finish_directory_create, regular_member, visit_directory};
+
         let mut checked = PathBuf::new();
         for component in directory.components() {
             checked.push(component);
-            match fs::symlink_metadata(&checked) {
-                Ok(metadata) if metadata.is_dir() => (),
-                Ok(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "log directory contains an alias or non-directory",
-                    ));
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    if !create {
-                        return Ok(false);
-                    }
-                    match fs::create_dir(&checked) {
-                        Ok(()) => (),
-                        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                            if !fs::symlink_metadata(&checked)?.is_dir() {
-                                return Err(error);
-                            }
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-                Err(error) => return Err(error),
+            let present = regular_member(
+                fs::symlink_metadata(&checked).map(|metadata| metadata.is_dir()),
+                |error: &io::Error| error.kind() == io::ErrorKind::NotFound,
+                || invalid("log directory contains an alias or non-directory"),
+            );
+            if !visit_directory(present, create, || {
+                finish_directory_create(
+                    fs::create_dir(&checked),
+                    |error: &io::Error| error.kind() == io::ErrorKind::AlreadyExists,
+                    || fs::symlink_metadata(&checked).map(|metadata| metadata.is_dir()),
+                )
+            })? {
+                return Ok(false);
             }
         }
         Ok(true)
@@ -416,20 +408,20 @@ impl RollingFile {
     }
 
     fn generation(file: &File) -> io::Result<Option<Generation>> {
+        use crate::verified_rolling::{HeaderKind, generation_header_kind};
+
         let mut header = Vec::new();
         BufReader::new(file)
             .take(HEADER_LIMIT)
             .read_until(b'\n', &mut header)?;
         // A former v1 log opens directly with a chrono-log/v1 record.
-        if !header.starts_with(GENERATION_PREFIX) {
-            return Ok(None);
+        match generation_header_kind(&header, GENERATION_PREFIX) {
+            HeaderKind::Legacy => Ok(None),
+            HeaderKind::Incomplete => Err(invalid("incomplete log generation header")),
+            HeaderKind::Decode => serde_json::from_slice(&header)
+                .map(Some)
+                .map_err(io::Error::other),
         }
-        if !header.ends_with(b"\n") {
-            return Err(invalid("incomplete log generation header"));
-        }
-        serde_json::from_slice(&header)
-            .map(Some)
-            .map_err(io::Error::other)
     }
 
     fn clear_pending(directory: &Path) -> io::Result<()> {
@@ -470,8 +462,11 @@ impl RollingFile {
         let deadline = generation_deadline(now, keep)
             .ok_or_else(|| invalid("log deadline exceeds supported time range"))?;
         let header = Self::generation_header(deadline)?;
-        let available = self.max_bytes.saturating_sub(header.len() as u64);
-        if !crate::verified_rolling::record_fits(bytes.len() as u64, available) {
+        if !crate::verified_rolling::generation_record_fits(
+            bytes.len() as u64,
+            header.len() as u64,
+            self.max_bytes,
+        ) {
             return Err(invalid("log record and generation header exceed max_bytes"));
         }
         Self::clear_pending(&self.directory)?;

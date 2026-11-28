@@ -23,6 +23,51 @@ fn expect(condition: bool)
 }
 
 #[cfg_attr(not(verus_keep_ghost), test)]
+fn directory_creation_only_rechecks_a_competing_creator() {
+    let ordinary = |error: &u8| -> (same: bool) ensures same == (*error == 17),
+    { *error == 17 };
+    let directory = || -> (seen: Result<bool, u8>) ensures seen == Ok::<bool, u8>(true),
+    { Ok(true) };
+    let alias = || -> (seen: Result<bool, u8>) ensures seen == Ok::<bool, u8>(false),
+    { Ok(false) };
+    let inaccessible = || -> (seen: Result<bool, u8>) ensures seen == Err::<bool, u8>(13),
+    { Err(13) };
+    let accepted = policy::finish_directory_create(Err(17), ordinary, directory);
+    let rejected = policy::finish_directory_create(Err(17), ordinary, alias);
+    let recheck = policy::finish_directory_create(Err(17), ordinary, inaccessible);
+    let initial = policy::finish_directory_create(Err(5), ordinary, directory);
+    expect(accepted.is_ok());
+    match rejected { Err(error) => expect(error == 17), _ => expect(false) }
+    match recheck { Err(error) => expect(error == 13), _ => expect(false) }
+    match initial { Err(error) => expect(error == 5), _ => expect(false) }
+
+    let create = || -> (seen: Result<(), u8>) ensures seen == Err::<(), u8>(13), { Err(13) };
+    match policy::visit_directory(Ok(false), false, create) {
+        Ok(present) => expect(!present), _ => expect(false),
+    }
+    match policy::visit_directory(Ok(false), true, create) {
+        Err(error) => expect(error == 13), _ => expect(false),
+    }
+    match policy::visit_directory(Err(22), true, create) {
+        Err(error) => expect(error == 22), _ => expect(false),
+    }
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
+fn only_a_complete_generation_header_reaches_the_decoder() {
+    use policy::HeaderKind;
+    let prefix: &[u8] = &[1, 2];
+    expect(matches!(policy::generation_header_kind(&[1], prefix), HeaderKind::Legacy));
+    expect(matches!(policy::generation_header_kind(&[1, 3, 10], prefix), HeaderKind::Legacy));
+    expect(matches!(policy::generation_header_kind(&[1, 2], prefix), HeaderKind::Incomplete));
+    expect(matches!(policy::generation_header_kind(&[1, 2, 10], prefix), HeaderKind::Decode));
+    expect(policy::generation_record_fits(1, 3, 4));
+    expect(!policy::generation_record_fits(2, 3, 4));
+    expect(!policy::generation_record_fits(1, 5, 4));
+    expect(!policy::generation_record_fits(1, u64::MAX, u64::MAX));
+}
+
+#[cfg_attr(not(verus_keep_ghost), test)]
 fn file_and_byte_bounds_are_positive_and_include_the_last_slot() {
     expect(policy::MAX_FILES == 64);
     expect(!policy::valid_bounds(0, 0));

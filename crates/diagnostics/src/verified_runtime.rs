@@ -1,8 +1,12 @@
 //! 双输出的真实调用顺序和结果组合；具体 Write 接口只转交原始结果。
 #[cfg(not(verus_keep_ghost))]
+use crate::runtime as owner;
+#[cfg(not(verus_keep_ghost))]
 use crate::verus;
 #[cfg(verus_keep_ghost)]
 use vstd::prelude::*;
+#[cfg(verus_keep_ghost)]
+use vstd::string::StringSliceAdditionalSpecFns;
 
 #[cfg(verus_keep_ghost)]
 #[path = "runtime.rs"]
@@ -21,6 +25,150 @@ pub mod cli;
 pub mod trace_events;
 
 verus! {
+pub const POLICY_LIMIT: usize = 16_384;
+
+pub fn policy_size_allowed(bytes: usize) -> (allowed: bool)
+    ensures allowed == (bytes <= POLICY_LIMIT),
+{
+    bytes <= POLICY_LIMIT
+}
+
+#[derive(PartialEq, Eq)]
+pub enum LogLevel { Trace, Debug, Info, Warn, Error }
+
+pub open spec fn has_prefix(text: &str, prefix: &str) -> bool {
+    prefix.spec_bytes().len() <= text.spec_bytes().len()
+        && forall|i: int| 0 <= i < prefix.spec_bytes().len()
+            ==> text.spec_bytes()[i] == prefix.spec_bytes()[i]
+}
+
+fn text_starts_with(text: &str, prefix: &str) -> (same: bool)
+    ensures same == has_prefix(text, prefix),
+{
+    let actual = text.as_bytes();
+    let expected = prefix.as_bytes();
+    if actual.len() < expected.len() {
+        return false;
+    }
+    let mut index = 0usize;
+    while index < expected.len()
+        invariant index <= expected.len() <= actual.len(),
+            forall|i: int| 0 <= i < index ==> actual[i] == expected[i],
+            actual@ == text.spec_bytes(), expected@ == prefix.spec_bytes(),
+        decreases expected.len() - index,
+    {
+        if actual[index] != expected[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn text_is(text: &str, literal: &str) -> (same: bool)
+    ensures same == (text.spec_bytes() == literal.spec_bytes()),
+{
+    if text.as_bytes().len() != literal.as_bytes().len() || !text_starts_with(text, literal) {
+        return false;
+    }
+    assert forall|i: int| 0 <= i < literal.spec_bytes().len() implies
+        text.spec_bytes()[i] == literal.spec_bytes()[i] by {};
+    assert(text.spec_bytes() =~= literal.spec_bytes());
+    true
+}
+
+pub fn policy_level(text: &str) -> (level: Option<LogLevel>)
+    ensures level == (
+        if text.spec_bytes() == "trace".spec_bytes() { Some(LogLevel::Trace) }
+        else if text.spec_bytes() == "debug".spec_bytes() { Some(LogLevel::Debug) }
+        else if text.spec_bytes() == "info".spec_bytes() { Some(LogLevel::Info) }
+        else if text.spec_bytes() == "warn".spec_bytes() { Some(LogLevel::Warn) }
+        else if text.spec_bytes() == "error".spec_bytes() { Some(LogLevel::Error) }
+        else { None }),
+{
+    if text_is(text, "trace") { Some(LogLevel::Trace) }
+    else if text_is(text, "debug") { Some(LogLevel::Debug) }
+    else if text_is(text, "info") { Some(LogLevel::Info) }
+    else if text_is(text, "warn") { Some(LogLevel::Warn) }
+    else if text_is(text, "error") { Some(LogLevel::Error) }
+    else { None }
+}
+
+/// The path adapter observes components and their normalized spelling using std::path.
+pub fn policy_directory_allowed(
+    directory: &str, component_count: usize, normal_components: bool, same_spelling: bool,
+) -> (allowed: bool)
+    ensures allowed == (
+        (directory.spec_bytes() == ".chrono-harness/logs/".spec_bytes()
+            || (component_count >= 3 && has_prefix(directory, ".chrono-harness/state/")))
+        && directory.spec_bytes().len() > 0
+        && directory.spec_bytes().last() == 47u8
+        && normal_components && same_spelling),
+{
+    let bytes = directory.as_bytes();
+    (text_is(directory, ".chrono-harness/logs/")
+        || (component_count >= 3 && text_starts_with(directory, ".chrono-harness/state/")))
+        && bytes.len() != 0 && bytes[bytes.len() - 1] == 47u8
+        && normal_components && same_spelling
+}
+
+pub fn policy_fields_allowed(
+    schema: &str, directory_allowed: bool, rolling_bounds: bool,
+    bytes: u64, max_bytes: u64, window: Option<u64>,
+) -> (allowed: bool)
+    ensures allowed == (
+        schema.spec_bytes() == "chrono-runtime-logging/v1".spec_bytes()
+        && directory_allowed
+        && rolling_bounds && bytes <= max_bytes && window != Some(0u64)),
+{
+    text_is(schema, "chrono-runtime-logging/v1")
+        && directory_allowed
+        && rolling_bounds && bytes <= max_bytes
+        && owner::retention_window_valid(window)
+}
+
+pub fn maintenance_policy<P>(policy: Option<(P, Option<u64>)>)
+    -> (selection: Option<(P, u64)>)
+    ensures match policy {
+        Some((value, Some(window))) => selection == Some((value, window)),
+        _ => selection.is_none(),
+    },
+{
+    match policy {
+        Some((value, Some(window))) => Some((value, window)),
+        _ => None,
+    }
+}
+
+pub fn mirror_enabled(policy_stderr: bool, explicit: bool) -> (mirror: bool)
+    ensures mirror == (policy_stderr || explicit),
+{
+    policy_stderr || explicit
+}
+
+/// Absence selects the caller's default, while a rejected policy invokes neither sink.
+pub fn use_policy<P, S, T, E, A, D>(
+    policy: Result<Option<P>, E>, sink: S, adopt: A, default: D,
+) -> (result: Result<T, E>)
+    where A: FnOnce(P, S) -> Result<T, E>, D: FnOnce(S) -> Result<T, E>,
+    requires match policy {
+        Ok(Some(value)) => adopt.requires((value, sink)),
+        Ok(None) => default.requires((sink,)),
+        Err(_) => true,
+    },
+    ensures match policy {
+        Ok(Some(value)) => adopt.ensures((value, sink), result),
+        Ok(None) => default.ensures((sink,), result),
+        Err(error) => result == Err::<T, E>(error),
+    },
+{
+    match policy {
+        Ok(Some(value)) => adopt(value, sink),
+        Ok(None) => default(sink),
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg_attr(not(verus_keep_ghost), derive(Default, serde::Serialize))]
 pub struct ExpiredLogs {
     pub removed: usize,
