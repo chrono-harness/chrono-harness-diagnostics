@@ -351,7 +351,7 @@ pub fn cli_events(
     operation: &str,
     pid: u32,
     input: impl Read,
-    mut ready: impl Write,
+    ready: impl Write,
 ) -> u8 {
     #[derive(Deserialize)]
     #[serde(rename_all = "snake_case")]
@@ -369,10 +369,18 @@ pub fn cli_events(
         bytes: Vec<u8>,
     }
     cli_session(root, producer, operation, pid, || {
-        ready
-            .write_all(b"{\"ready\":true}\n")
-            .and_then(|()| ready.flush())
-            .map_err(io_failure)?;
+        let (_, result) = verified_runtime::write_and_flush(
+            ready,
+            |mut ready| {
+                let result = ready.write_all(b"{\"ready\":true}\n");
+                (ready, result)
+            },
+            |mut ready| {
+                let result = ready.flush();
+                (ready, result)
+            },
+        );
+        result.map_err(io_failure)?;
         let mut receiver = crate::trace_events::receiver();
         for event in serde_json::Deserializer::from_reader(input).into_iter::<Event>() {
             match event

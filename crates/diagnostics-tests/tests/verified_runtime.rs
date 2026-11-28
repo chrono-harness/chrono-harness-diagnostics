@@ -770,9 +770,9 @@ fn an_undelivered_terminal_reply_returns_the_original_write_or_flush_error() {
 
 #[cfg(verus_keep_ghost)]
 verus! {
-fn trace_exit_keeps_the_original_status_or_reports_failure(code: u8, reason: u64) {
-    let completed = policy::cli::trace_exit(Ok::<u8, u64>(code));
-    let failed = policy::cli::trace_exit(Err::<u8, u64>(reason));
+fn output_exit_keeps_the_original_status_or_reports_failure(code: u8, reason: u64) {
+    let completed = policy::cli::output_exit(Ok::<u8, u64>(code));
+    let failed = policy::cli::output_exit(Err::<u8, u64>(reason));
     assert(completed == code && failed == 2);
 }
 }
